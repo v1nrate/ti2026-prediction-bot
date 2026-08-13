@@ -5,6 +5,7 @@ const STRATZ_GRAPHQL = "https://api.stratz.com/graphql";
 
 const TEAM_MATCH_TAKE = 5;
 const TEAM_BATCH_SIZE = 5;
+const CHECK_COOLDOWN_MS = 45 * 1000;
 
 const PREDICTIONS = [
   { team: "Team Vision", kind: "4-0" },
@@ -131,20 +132,20 @@ const ALIASES = {
 };
 
 const SEED_TEAM_IDS = [
-  7119388,  // Team Spirit
-  8261500,  // Xtreme Gaming
-  9823272,  // Team Yandex
-  2163,     // Team Liquid
-  9824702,  // PVISION
-  726228,   // Vici Gaming
-  10136357, // Nigma Galaxy
+  7119388,
+  8261500,
+  9823272,
+  2163,
+  9824702,
+  726228,
+  10136357,
 
-  9247354,  // Team Falcons
-  8255888,  // BetBoom Team
-  9964962,  // GamerLegion
+  9247354,
+  8255888,
+  9964962,
 
-  10150413, // Tundra Esports -> Iron Wing
-  5017210,  // EHOME.immortal -> Team Resilience
+  10150413,
+  5017210,
 ];
 
 const KIND_LABEL = {
@@ -179,7 +180,10 @@ const STATUS_ICON = {
 
 const aliasMap = new Map();
 
-for (const [canonical, aliases] of Object.entries(ALIASES)) {
+for (
+  const [canonical, aliases]
+  of Object.entries(ALIASES)
+) {
   for (const alias of aliases) {
     aliasMap.set(
       normalizeName(alias),
@@ -200,7 +204,9 @@ function canonicalTeam(value) {
   }
 
   return (
-    aliasMap.get(normalizeName(value)) ||
+    aliasMap.get(
+      normalizeName(value),
+    ) ||
     String(value).trim()
   );
 }
@@ -212,11 +218,19 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;");
 }
 
-function jsonResponse(data, status = 200) {
+function jsonResponse(
+  data,
+  status = 200,
+) {
   return new Response(
-    JSON.stringify(data, null, 2),
+    JSON.stringify(
+      data,
+      null,
+      2,
+    ),
     {
       status,
+
       headers: {
         "content-type":
           "application/json; charset=utf-8",
@@ -225,11 +239,15 @@ function jsonResponse(data, status = 200) {
   );
 }
 
-function textResponse(text, status = 200) {
+function textResponse(
+  text,
+  status = 200,
+) {
   return new Response(
     text,
     {
       status,
+
       headers: {
         "content-type":
           "text/plain; charset=utf-8",
@@ -240,7 +258,11 @@ function textResponse(text, status = 200) {
 
 function sleep(ms) {
   return new Promise(
-    (resolve) => setTimeout(resolve, ms),
+    (resolve) =>
+      setTimeout(
+        resolve,
+        ms,
+      ),
   );
 }
 
@@ -254,7 +276,8 @@ function emptyTeamState(team) {
     gameWins: 0,
     gameLosses: 0,
 
-    eliminationResult: null,
+    eliminationResult:
+      null,
   };
 }
 
@@ -268,43 +291,51 @@ function pairKey(game) {
 }
 
 function buildSeries(games) {
-  const bySeriesId = new Map();
+  const bySeriesId =
+    new Map();
 
-  /*
-   * Собираем серию + время последней известной карты.
-   *
-   * Это важно для старых матчей, которые уже лежат
-   * в Durable Object и были сохранены до появления
-   * series.lastMatchDateTime.
-   */
   for (const game of games) {
-    const s = game.series;
+    const s =
+      game.series;
 
     if (
       !game.seriesId ||
       !s ||
-      Number(s.leagueId) !== LEAGUE_ID
+      Number(
+        s.leagueId,
+      ) !== LEAGUE_ID
     ) {
       continue;
     }
 
-    if (s.type !== "BEST_OF_THREE") {
+    if (
+      s.type !==
+      "BEST_OF_THREE"
+    ) {
       continue;
     }
 
     const seriesId =
-      Number(game.seriesId);
+      Number(
+        game.seriesId,
+      );
 
     const gameTime =
-      Number(game.startTime || 0);
+      Number(
+        game.startTime ||
+          0,
+      );
 
     const stratzSeriesTime =
       Number(
-        s.lastMatchDateTime || 0,
+        s.lastMatchDateTime ||
+          0,
       );
 
     const existing =
-      bySeriesId.get(seriesId);
+      bySeriesId.get(
+        seriesId,
+      );
 
     if (!existing) {
       bySeriesId.set(
@@ -323,11 +354,6 @@ function buildSeries(games) {
       continue;
     }
 
-    /*
-     * Если одна серия встретилась несколько раз
-     * (по одной записи на каждую карту),
-     * сохраняем максимальное время.
-     */
     existing.lastGameTime =
       Math.max(
         existing.lastGameTime,
@@ -340,16 +366,12 @@ function buildSeries(games) {
         stratzSeriesTime,
       );
 
-    /*
-     * Берём наиболее свежую версию series,
-     * потому что в ней уже может быть
-     * финальный счёт 2:0 / 2:1.
-     */
     if (
       stratzSeriesTime >=
       existing.stratzSeriesTime
     ) {
-      existing.series = s;
+      existing.series =
+        s;
     }
   }
 
@@ -377,17 +399,20 @@ function buildSeries(games) {
 
     const scoreA =
       Number(
-        s.teamOneWinCount || 0,
+        s.teamOneWinCount ||
+          0,
       );
 
     const scoreB =
       Number(
-        s.teamTwoWinCount || 0,
+        s.teamTwoWinCount ||
+          0,
       );
 
     const winningTeamId =
       Number(
-        s.winningTeamId || 0,
+        s.winningTeamId ||
+          0,
       );
 
     if (
@@ -399,10 +424,6 @@ function buildSeries(games) {
       continue;
     }
 
-    /*
-     * Завершённая BO3:
-     * одна из команд должна набрать 2 карты.
-     */
     if (
       Math.max(
         scoreA,
@@ -415,12 +436,16 @@ function buildSeries(games) {
 
     const winner =
       winningTeamId ===
-      Number(s.teamOneId)
+      Number(
+        s.teamOneId,
+      )
         ? teamA
         : winningTeamId ===
-          Number(s.teamTwoId)
-        ? teamB
-        : null;
+          Number(
+            s.teamTwoId,
+          )
+          ? teamB
+          : null;
 
     if (!winner) {
       continue;
@@ -431,17 +456,9 @@ function buildSeries(games) {
         ? teamB
         : teamA;
 
-    /*
-     * Приоритет:
-     *
-     * 1. STRATZ series.lastMatchDateTime
-     * 2. startTime последней карты серии
-     *
-     * Поэтому даже старые записи больше
-     * никогда не превратятся в 01.01.1970.
-     */
     const startTime =
-      entry.stratzSeriesTime > 0
+      entry.stratzSeriesTime >
+      0
         ? entry.stratzSeriesTime
         : entry.lastGameTime;
 
@@ -464,11 +481,6 @@ function buildSeries(games) {
     });
   }
 
-  /*
-   * ВАЖНО:
-   * теперь сортируем именно по времени,
-   * а не по seriesId.
-   */
   preliminary.sort(
     (a, b) =>
       a.startTime -
@@ -484,22 +496,37 @@ function buildSeries(games) {
 
   const stateFor =
     (team) => {
-      if (!states.has(team)) {
+      if (
+        !states.has(
+          team,
+        )
+      ) {
         states.set(
           team,
-          emptyTeamState(team),
+          emptyTeamState(
+            team,
+          ),
         );
       }
 
-      return states.get(team);
+      return states.get(
+        team,
+      );
     };
 
-  for (const s of preliminary) {
+  for (
+    const s
+    of preliminary
+  ) {
     const a =
-      stateFor(s.teamA);
+      stateFor(
+        s.teamA,
+      );
 
     const b =
-      stateFor(s.teamB);
+      stateFor(
+        s.teamB,
+      );
 
     const aReady =
       a.swissWins +
@@ -507,12 +534,16 @@ function buildSeries(games) {
         5 &&
       (
         (
-          a.swissWins === 3 &&
-          a.swissLosses === 2
+          a.swissWins ===
+            3 &&
+          a.swissLosses ===
+            2
         ) ||
         (
-          a.swissWins === 2 &&
-          a.swissLosses === 3
+          a.swissWins ===
+            2 &&
+          a.swissLosses ===
+            3
         )
       );
 
@@ -522,12 +553,16 @@ function buildSeries(games) {
         5 &&
       (
         (
-          b.swissWins === 3 &&
-          b.swissLosses === 2
+          b.swissWins ===
+            3 &&
+          b.swissLosses ===
+            2
         ) ||
         (
-          b.swissWins === 2 &&
-          b.swissLosses === 3
+          b.swissWins ===
+            2 &&
+          b.swissLosses ===
+            3
         )
       );
 
@@ -542,14 +577,19 @@ function buildSeries(games) {
       stage,
     });
 
-    if (stage === "swiss") {
+    if (
+      stage ===
+      "swiss"
+    ) {
       stateFor(
         s.winner,
-      ).swissWins += 1;
+      ).swissWins +=
+        1;
 
       stateFor(
         s.loser,
-      ).swissLosses += 1;
+      ).swissLosses +=
+        1;
     } else {
       stateFor(
         s.winner,
@@ -566,7 +606,9 @@ function buildSeries(games) {
   return results;
 }
 
-function calculateStates(games) {
+function calculateStates(
+  games,
+) {
   const states =
     new Map();
 
@@ -576,29 +618,43 @@ function calculateStates(games) {
   ) {
     states.set(
       p.team,
+
       emptyTeamState(
         p.team,
       ),
     );
   }
 
-  const stateFor = (team) => {
-    if (!states.has(team)) {
-      states.set(
-        team,
-        emptyTeamState(
+  const stateFor =
+    (team) => {
+      if (
+        !states.has(
           team,
-        ),
-      );
-    }
+        )
+      ) {
+        states.set(
+          team,
 
-    return states.get(team);
-  };
+          emptyTeamState(
+            team,
+          ),
+        );
+      }
+
+      return states.get(
+        team,
+      );
+    };
 
   const series =
-    buildSeries(games);
+    buildSeries(
+      games,
+    );
 
-  for (const s of series) {
+  for (
+    const s
+    of series
+  ) {
     const a =
       stateFor(
         s.teamA,
@@ -610,15 +666,18 @@ function calculateStates(games) {
       );
 
     if (
-      s.stage === "swiss"
+      s.stage ===
+      "swiss"
     ) {
       stateFor(
         s.winner,
-      ).swissWins += 1;
+      ).swissWins +=
+        1;
 
       stateFor(
         s.loser,
-      ).swissLosses += 1;
+      ).swissLosses +=
+        1;
 
       a.gameWins +=
         s.scoreA;
@@ -783,8 +842,10 @@ function predictionStatus(
   }
 
   if (
-    kind === "elim_win" ||
-    kind === "elim_loss"
+    kind ===
+      "elim_win" ||
+    kind ===
+      "elim_loss"
   ) {
     const wanted =
       kind ===
@@ -802,7 +863,9 @@ function predictionStatus(
       ) {
         return [
           "won",
-          wanted === "won"
+
+          wanted ===
+          "won"
             ? "выиграли раунд на выбывание — точное попадание"
             : "проиграли раунд на выбывание — точное попадание",
         ];
@@ -818,14 +881,18 @@ function predictionStatus(
       ];
     }
 
-    if (w >= 4) {
+    if (
+      w >= 4
+    ) {
       return [
         "lost",
         `закончили этап ${w}-${l} и прошли напрямую; раунда на выбывание для них не будет`,
       ];
     }
 
-    if (l >= 4) {
+    if (
+      l >= 4
+    ) {
       return [
         "lost",
         `закончили этап ${w}-${l} и вылетели напрямую; раунда на выбывание для них не будет`,
@@ -849,7 +916,8 @@ function predictionStatus(
         "waiting",
 
         `закончили этап ${w}-${l}; теперь должны ${
-          wanted === "won"
+          wanted ===
+          "won"
             ? "выиграть"
             : "проиграть"
         } раунд на выбывание`,
@@ -901,7 +969,9 @@ function makeSnapshot(
         st,
       );
 
-    result[p.team] = {
+    result[
+      p.team
+    ] = {
       kind:
         p.kind,
 
@@ -940,10 +1010,13 @@ function predictionsText() {
       of PREDICTIONS
     ) {
       if (
-        p.kind === kind
+        p.kind ===
+        kind
       ) {
         lines.push(
-          `• ${escapeHtml(p.team)}`,
+          `• ${escapeHtml(
+            p.team,
+          )}`,
         );
       }
     }
@@ -958,26 +1031,31 @@ function predictionIcon(
   status,
   state,
 ) {
-  if (status === "won") {
+  if (
+    status === "won"
+  ) {
     return "✅";
   }
 
-  if (status === "lost") {
+  if (
+    status === "lost"
+  ) {
     return "🔴";
   }
 
-  if (status === "waiting") {
+  if (
+    status === "waiting"
+  ) {
     return "🟡";
   }
 
-  /*
-   * Команда ещё вообще
-   * не сыграла ни одной серии.
-   */
   if (
-    state.swissWins === 0 &&
-    state.swissLosses === 0 &&
-    state.eliminationResult === null
+    state.swissWins ===
+      0 &&
+    state.swissLosses ===
+      0 &&
+    state.eliminationResult ===
+      null
   ) {
     return "⚪";
   }
@@ -996,27 +1074,31 @@ function compactPredictionHint(
   const l =
     state.swissLosses;
 
-  /*
-   * Если прогноз уже окончательно
-   * рассчитан — говорим об этом.
-   */
-  if (status === "won") {
+  if (
+    status === "won"
+  ) {
     return "прогноз сыграл";
   }
 
-  if (status === "lost") {
+  if (
+    status === "lost"
+  ) {
     return "прогноз уже не сыграет";
   }
 
-  if (status === "waiting") {
+  if (
+    status === "waiting"
+  ) {
     if (
-      kind === "elim_win"
+      kind ===
+      "elim_win"
     ) {
       return "нужно выиграть раунд на выбывание";
     }
 
     if (
-      kind === "elim_loss"
+      kind ===
+      "elim_loss"
     ) {
       return "нужно проиграть раунд на выбывание";
     }
@@ -1024,46 +1106,52 @@ function compactPredictionHint(
     return "решающий этап";
   }
 
-  /*
-   * Точные результаты.
-   */
-  if (kind === "4-0") {
+  if (
+    kind === "4-0"
+  ) {
     const remaining =
       Math.max(
         0,
         4 - w,
       );
 
-    return remaining === 1
-      ? "осталась 1 победа"
-      : `осталось побед: ${remaining}`;
+    return (
+      remaining ===
+      1
+        ? "осталась 1 победа"
+        : `осталось побед: ${remaining}`
+    );
   }
 
-  if (kind === "4-1") {
+  if (
+    kind === "4-1"
+  ) {
     return "цель: закончить 4-1";
   }
 
-  if (kind === "1-4") {
+  if (
+    kind === "1-4"
+  ) {
     return "цель: закончить 1-4";
   }
 
-  if (kind === "0-4") {
+  if (
+    kind === "0-4"
+  ) {
     const remaining =
       Math.max(
         0,
         4 - l,
       );
 
-    return remaining === 1
-      ? "осталось 1 поражение"
-      : `осталось поражений: ${remaining}`;
+    return (
+      remaining ===
+      1
+        ? "осталось 1 поражение"
+        : `осталось поражений: ${remaining}`
+    );
   }
 
-  /*
-   * Для elimination-прогнозов
-   * до решающего этапа дополнительная
-   * строка не нужна.
-   */
   return null;
 }
 
@@ -1079,10 +1167,17 @@ function statusText(
     );
 
   const getData =
-    (team, kind) => {
+    (
+      team,
+      kind,
+    ) => {
       const state =
-        states.get(team) ||
-        emptyTeamState(team);
+        states.get(
+          team,
+        ) ||
+        emptyTeamState(
+          team,
+        );
 
       const [
         status,
@@ -1117,9 +1212,6 @@ function statusText(
     "",
   ];
 
-  /*
-   * 4-0
-   */
   lines.push(
     "🎯 <b>ТОЧНЫЙ СЧЁТ</b>",
     "",
@@ -1130,7 +1222,8 @@ function statusText(
     const p
     of PREDICTIONS.filter(
       (x) =>
-        x.kind === "4-0",
+        x.kind ===
+        "4-0",
     )
   ) {
     const d =
@@ -1140,19 +1233,22 @@ function statusText(
       );
 
     lines.push(
-      `${d.icon} <b>${escapeHtml(p.team)}</b> — <b>${d.state.swissWins}–${d.state.swissLosses}</b>`,
+      `${d.icon} <b>${escapeHtml(
+        p.team,
+      )}</b> — <b>${d.state.swissWins}–${d.state.swissLosses}</b>`,
     );
 
-    if (d.hint) {
+    if (
+      d.hint
+    ) {
       lines.push(
-        `   ↳ ${escapeHtml(d.hint)}`,
+        `   ↳ ${escapeHtml(
+          d.hint,
+        )}`,
       );
     }
   }
 
-  /*
-   * 4-1
-   */
   lines.push(
     "",
     "<b>4–1</b>",
@@ -1162,7 +1258,8 @@ function statusText(
     const p
     of PREDICTIONS.filter(
       (x) =>
-        x.kind === "4-1",
+        x.kind ===
+        "4-1",
     )
   ) {
     const d =
@@ -1172,19 +1269,22 @@ function statusText(
       );
 
     lines.push(
-      `${d.icon} <b>${escapeHtml(p.team)}</b> — <b>${d.state.swissWins}–${d.state.swissLosses}</b>`,
+      `${d.icon} <b>${escapeHtml(
+        p.team,
+      )}</b> — <b>${d.state.swissWins}–${d.state.swissLosses}</b>`,
     );
 
-    if (d.hint) {
+    if (
+      d.hint
+    ) {
       lines.push(
-        `   ↳ ${escapeHtml(d.hint)}`,
+        `   ↳ ${escapeHtml(
+          d.hint,
+        )}`,
       );
     }
   }
 
-  /*
-   * Проходят elimination.
-   */
   lines.push(
     "",
     "🔥 <b>ПРОХОДЯТ РАУНД НА ВЫБЫВАНИЕ</b>",
@@ -1206,28 +1306,24 @@ function statusText(
       );
 
     lines.push(
-      `${d.icon} <b>${escapeHtml(p.team)}</b> — <b>${d.state.swissWins}–${d.state.swissLosses}</b>`,
+      `${d.icon} <b>${escapeHtml(
+        p.team,
+      )}</b> — <b>${d.state.swissWins}–${d.state.swissLosses}</b>`,
     );
 
-    /*
-     * Здесь подсказку показываем
-     * только когда уже наступил
-     * решающий этап или прогноз
-     * рассчитан.
-     */
     if (
-      d.status !== "alive" &&
+      d.status !==
+        "alive" &&
       d.hint
     ) {
       lines.push(
-        `   ↳ ${escapeHtml(d.hint)}`,
+        `   ↳ ${escapeHtml(
+          d.hint,
+        )}`,
       );
     }
   }
 
-  /*
-   * Вылетают elimination.
-   */
   lines.push(
     "",
     "💀 <b>ВЫЛЕТАЮТ В РАУНДЕ НА ВЫБЫВАНИЕ</b>",
@@ -1249,22 +1345,24 @@ function statusText(
       );
 
     lines.push(
-      `${d.icon} <b>${escapeHtml(p.team)}</b> — <b>${d.state.swissWins}–${d.state.swissLosses}</b>`,
+      `${d.icon} <b>${escapeHtml(
+        p.team,
+      )}</b> — <b>${d.state.swissWins}–${d.state.swissLosses}</b>`,
     );
 
     if (
-      d.status !== "alive" &&
+      d.status !==
+        "alive" &&
       d.hint
     ) {
       lines.push(
-        `   ↳ ${escapeHtml(d.hint)}`,
+        `   ↳ ${escapeHtml(
+          d.hint,
+        )}`,
       );
     }
   }
 
-  /*
-   * 1-4
-   */
   lines.push(
     "",
     "🎯 <b>ТОЧНЫЙ СЧЁТ</b>",
@@ -1276,7 +1374,8 @@ function statusText(
     const p
     of PREDICTIONS.filter(
       (x) =>
-        x.kind === "1-4",
+        x.kind ===
+        "1-4",
     )
   ) {
     const d =
@@ -1286,19 +1385,22 @@ function statusText(
       );
 
     lines.push(
-      `${d.icon} <b>${escapeHtml(p.team)}</b> — <b>${d.state.swissWins}–${d.state.swissLosses}</b>`,
+      `${d.icon} <b>${escapeHtml(
+        p.team,
+      )}</b> — <b>${d.state.swissWins}–${d.state.swissLosses}</b>`,
     );
 
-    if (d.hint) {
+    if (
+      d.hint
+    ) {
       lines.push(
-        `   ↳ ${escapeHtml(d.hint)}`,
+        `   ↳ ${escapeHtml(
+          d.hint,
+        )}`,
       );
     }
   }
 
-  /*
-   * 0-4
-   */
   lines.push(
     "",
     "<b>0–4</b>",
@@ -1308,7 +1410,8 @@ function statusText(
     const p
     of PREDICTIONS.filter(
       (x) =>
-        x.kind === "0-4",
+        x.kind ===
+        "0-4",
     )
   ) {
     const d =
@@ -1318,19 +1421,22 @@ function statusText(
       );
 
     lines.push(
-      `${d.icon} <b>${escapeHtml(p.team)}</b> — <b>${d.state.swissWins}–${d.state.swissLosses}</b>`,
+      `${d.icon} <b>${escapeHtml(
+        p.team,
+      )}</b> — <b>${d.state.swissWins}–${d.state.swissLosses}</b>`,
     );
 
-    if (d.hint) {
+    if (
+      d.hint
+    ) {
       lines.push(
-        `   ↳ ${escapeHtml(d.hint)}`,
+        `   ↳ ${escapeHtml(
+          d.hint,
+        )}`,
       );
     }
   }
 
-  /*
-   * Легенда.
-   */
   lines.push(
     "",
     "━━━━━━━━━━━━━━━━━━",
@@ -1398,10 +1504,16 @@ function changesText(
     }
 
     lines.push(
-      `${STATUS_ICON[after.status] || "ℹ️"} <b>${escapeHtml(p.team)}</b>: ` +
+      `${STATUS_ICON[
+        after.status
+      ] || "ℹ️"} <b>${escapeHtml(
+        p.team,
+      )}</b>: ` +
         `${before.swissWins}-${before.swissLosses} → ` +
         `${after.swissWins}-${after.swissLosses}\n` +
-        `   ${escapeHtml(after.reason)}`,
+        `   ${escapeHtml(
+          after.reason,
+        )}`,
     );
   }
 
@@ -1419,18 +1531,24 @@ function changesText(
   );
 }
 
-function recentGamesText(games) {
+function recentGamesText(
+  games,
+) {
   const series =
-    buildSeries(games);
-
-  if (!series.length) {
-    return (
-      "Пока ни одной завершённой серии TI 2026 не найдено."
+    buildSeries(
+      games,
     );
+
+  if (
+    !series.length
+  ) {
+    return "Пока ни одной завершённой серии TI 2026 не найдено.";
   }
 
   const sorted =
-    [...series].sort(
+    [
+      ...series,
+    ].sort(
       (a, b) =>
         b.startTime -
           a.startTime ||
@@ -1492,10 +1610,14 @@ function recentGamesText(games) {
       },
     );
 
-  for (const s of sorted) {
+  for (
+    const s
+    of sorted
+  ) {
     const date =
       new Date(
-        s.startTime * 1000,
+        s.startTime *
+          1000,
       );
 
     const dateKey =
@@ -1509,7 +1631,9 @@ function recentGamesText(games) {
       );
 
     if (
-      !groups.has(dateKey)
+      !groups.has(
+        dateKey,
+      )
     ) {
       groups.set(
         dateKey,
@@ -1524,9 +1648,13 @@ function recentGamesText(games) {
     }
 
     groups
-      .get(dateKey)
+      .get(
+        dateKey,
+      )
       .items
-      .push(s);
+      .push(
+        s,
+      );
   }
 
   const lines = [
@@ -1539,7 +1667,9 @@ function recentGamesText(games) {
     of groups.values()
   ) {
     lines.push(
-      `📅 <b>${escapeHtml(group.title)}</b>`,
+      `📅 <b>${escapeHtml(
+        group.title,
+      )}</b>`,
     );
 
     lines.push("");
@@ -1558,7 +1688,8 @@ function recentGamesText(games) {
       let loserScore;
 
       if (
-        winner === s.teamA
+        winner ===
+        s.teamA
       ) {
         winnerScore =
           s.scoreA;
@@ -1583,9 +1714,13 @@ function recentGamesText(games) {
 
       lines.push(
         `🕐 <b>${time}</b> · ✅ ` +
-        `<b>${escapeHtml(winner)}</b> ` +
-        `<b>${winnerScore}:${loserScore}</b> ` +
-        `${escapeHtml(loser)}`,
+          `<b>${escapeHtml(
+            winner,
+          )}</b> ` +
+          `<b>${winnerScore}:${loserScore}</b> ` +
+          `${escapeHtml(
+            loser,
+          )}`,
       );
     }
 
@@ -1629,7 +1764,8 @@ function telegramKeyboard() {
       ],
     ],
 
-    resize_keyboard: true,
+    resize_keyboard:
+      true,
   };
 }
 
@@ -1665,7 +1801,9 @@ async function telegramCall(
     !data.ok
   ) {
     throw new Error(
-      `Telegram ${method}: ${JSON.stringify(data)}`,
+      `Telegram ${method}: ${JSON.stringify(
+        data,
+      )}`,
     );
   }
 
@@ -1721,7 +1859,9 @@ async function stratzQuery(
     "=== STRATZ GRAPHQL QUERY START ===",
   );
 
-  console.log(query);
+  console.log(
+    query,
+  );
 
   console.log(
     "=== STRATZ GRAPHQL QUERY END ===",
@@ -1756,8 +1896,6 @@ async function stratzQuery(
       },
     );
 
-  // дальше оставляешь весь свой текущий код
-
   const text =
     await response.text();
 
@@ -1765,7 +1903,10 @@ async function stratzQuery(
     !response.ok
   ) {
     throw new Error(
-      `STRATZ HTTP ${response.status}: ${text.slice(0, 300)}`,
+      `STRATZ HTTP ${response.status}: ${text.slice(
+        0,
+        300,
+      )}`,
     );
   }
 
@@ -1778,12 +1919,16 @@ async function stratzQuery(
       );
   } catch {
     throw new Error(
-      `STRATZ returned invalid JSON: ${text.slice(0, 300)}`,
+      `STRATZ returned invalid JSON: ${text.slice(
+        0,
+        300,
+      )}`,
     );
   }
 
   if (
-    payload.errors?.length
+    payload.errors
+      ?.length
   ) {
     throw new Error(
       "STRATZ GraphQL: " +
@@ -1792,7 +1937,9 @@ async function stratzQuery(
             (x) =>
               x.message,
           )
-          .join(" | "),
+          .join(
+            " | ",
+          ),
     );
   }
 
@@ -1839,60 +1986,89 @@ function parseStratzMatch(
 
   return {
     matchId:
-      Number(raw.id),
+      Number(
+        raw.id,
+      ),
 
     seriesId:
       raw.seriesId
-        ? Number(raw.seriesId)
+        ? Number(
+            raw.seriesId,
+          )
         : null,
-    
+
     series:
       raw.series
         ? {
-            id: Number(raw.series.id),
-    
+            id:
+              Number(
+                raw.series.id,
+              ),
+
             type:
-              raw.series.type || null,
-    
+              raw.series.type ||
+              null,
+
             leagueId:
-              Number(raw.series.leagueId || 0),
-    
+              Number(
+                raw.series.leagueId ||
+                  0,
+              ),
+
             teamOneId:
-              Number(raw.series.teamOneId || 0),
-    
+              Number(
+                raw.series.teamOneId ||
+                  0,
+              ),
+
             teamTwoId:
-              Number(raw.series.teamTwoId || 0),
-    
+              Number(
+                raw.series.teamTwoId ||
+                  0,
+              ),
+
             teamOne:
               canonicalTeam(
-                raw.series.teamOne?.name,
+                raw.series
+                  .teamOne
+                  ?.name,
               ),
-    
+
             teamTwo:
               canonicalTeam(
-                raw.series.teamTwo?.name,
+                raw.series
+                  .teamTwo
+                  ?.name,
               ),
-    
+
             teamOneWinCount:
               Number(
-                raw.series.teamOneWinCount || 0,
+                raw.series
+                  .teamOneWinCount ||
+                  0,
               ),
-    
+
             teamTwoWinCount:
               Number(
-                raw.series.teamTwoWinCount || 0,
+                raw.series
+                  .teamTwoWinCount ||
+                  0,
               ),
-    
+
             winningTeamId:
-              raw.series.winningTeamId
+              raw.series
+                .winningTeamId
                 ? Number(
-                    raw.series.winningTeamId,
+                    raw.series
+                      .winningTeamId,
                   )
                 : null,
-                    
+
             lastMatchDateTime:
               Number(
-                raw.series.lastMatchDateTime || 0,
+                raw.series
+                  .lastMatchDateTime ||
+                  0,
               ),
           }
         : null,
@@ -1947,28 +2123,25 @@ async function fetchTeamsMatches(
   const ids = [
     ...new Set(
       teamIds
-        .map(Number)
+        .map(
+          Number,
+        )
         .filter(
           (id) =>
-            Number.isFinite(id) &&
+            Number.isFinite(
+              id,
+            ) &&
             id > 0,
         ),
     ),
   ];
 
-  if (!ids.length) {
+  if (
+    !ids.length
+  ) {
     return [];
   }
 
-  /*
-   * Берём достаточно большой кусок истории
-   * одним запросом.
-   *
-   * Важно: STRATZ раньше ограничивал take=5
-   * на team.matches, поэтому оставляем 5.
-   * Быстродействие получаем не за счёт take,
-   * а за счёт отказа от пагинации/discovery.
-   */
   const query = `{
     teams(teamIds: [${ids.join(",")}]) {
       id
@@ -1976,7 +2149,7 @@ async function fetchTeamsMatches(
 
       matches(
         request: {
-          take: 5
+          take: ${TEAM_MATCH_TAKE}
           skip: 0
         }
       ) {
@@ -2003,19 +2176,19 @@ async function fetchTeamsMatches(
           id
           type
           leagueId
-        
+
           teamOneId
           teamTwoId
           teamOneWinCount
           teamTwoWinCount
           winningTeamId
           lastMatchDateTime
-        
+
           teamOne {
             id
             name
           }
-        
+
           teamTwo {
             id
             name
@@ -2042,25 +2215,23 @@ async function fetchCurrentTIGames(
   env,
   knownIds,
 ) {
-  /*
-   * Больше НЕ делаем:
-   * - discovery rounds;
-   * - frontier;
-   * - пагинацию;
-   * - fetchTeamBatchHistory;
-   *
-   * Берём только известные нам команды.
-   */
   const ids = [
     ...new Set(
       [
         ...SEED_TEAM_IDS,
-        ...(knownIds || []),
+        ...(
+          knownIds ||
+          []
+        ),
       ]
-        .map(Number)
+        .map(
+          Number,
+        )
         .filter(
           (id) =>
-            Number.isFinite(id) &&
+            Number.isFinite(
+              id,
+            ) &&
             id > 0,
         ),
     ),
@@ -2070,28 +2241,27 @@ async function fetchCurrentTIGames(
     new Map();
 
   const discoveredIds =
-    new Set(ids);
+    new Set(
+      ids,
+    );
 
-  /*
-   * STRATZ нормально принимает несколько
-   * teamIds, но не будем делать огромный
-   * GraphQL на всякий случай.
-   *
-   * 5 команд на запрос.
-   * При 18 ID это всего 4 запроса.
-   */
   for (
     let offset = 0;
-    offset < ids.length;
-    offset += TEAM_BATCH_SIZE
+    offset <
+    ids.length;
+    offset +=
+      TEAM_BATCH_SIZE
   ) {
     const batch =
       ids.slice(
         offset,
-        offset + TEAM_BATCH_SIZE,
+        offset +
+          TEAM_BATCH_SIZE,
       );
 
-    if (!batch.length) {
+    if (
+      !batch.length
+    ) {
       continue;
     }
 
@@ -2101,11 +2271,19 @@ async function fetchCurrentTIGames(
         batch,
       );
 
-    for (const team of teams) {
+    for (
+      const team
+      of teams
+    ) {
       const teamId =
-        Number(team?.id || 0);
+        Number(
+          team?.id ||
+            0,
+        );
 
-      if (teamId > 0) {
+      if (
+        teamId > 0
+      ) {
         discoveredIds.add(
           teamId,
         );
@@ -2113,40 +2291,49 @@ async function fetchCurrentTIGames(
 
       for (
         const raw
-        of team?.matches || []
+        of (
+          team?.matches ||
+          []
+        )
       ) {
-        /*
-         * Соперников запоминаем для информации,
-         * но НЕ запускаем по ним новый discovery.
-         */
         const radiantId =
           Number(
             raw.radiantTeamId ||
-              raw.radiantTeam?.id ||
+              raw.radiantTeam
+                ?.id ||
               0,
           );
 
         const direId =
           Number(
             raw.direTeamId ||
-              raw.direTeam?.id ||
+              raw.direTeam
+                ?.id ||
               0,
           );
 
-        if (radiantId > 0) {
+        if (
+          radiantId >
+          0
+        ) {
           discoveredIds.add(
             radiantId,
           );
         }
 
-        if (direId > 0) {
+        if (
+          direId >
+          0
+        ) {
           discoveredIds.add(
             direId,
           );
         }
 
         if (
-          Number(raw.leagueId) !==
+          Number(
+            raw.leagueId,
+          ) !==
           LEAGUE_ID
         ) {
           continue;
@@ -2157,12 +2344,16 @@ async function fetchCurrentTIGames(
             raw,
           );
 
-        if (!game) {
+        if (
+          !game
+        ) {
           continue;
         }
 
         byId.set(
-          Number(game.matchId),
+          Number(
+            game.matchId,
+          ),
           game,
         );
       }
@@ -2186,6 +2377,67 @@ async function fetchCurrentTIGames(
   };
 }
 
+function teamsDebugText(
+  games,
+) {
+  const names =
+    new Set();
+
+  for (
+    const game
+    of games
+  ) {
+    if (
+      game.radiant
+    ) {
+      names.add(
+        game.radiant,
+      );
+    }
+
+    if (
+      game.dire
+    ) {
+      names.add(
+        game.dire,
+      );
+    }
+  }
+
+  const sorted =
+    [
+      ...names,
+    ].sort(
+      (
+        a,
+        b,
+      ) =>
+        a.localeCompare(
+          b,
+        ),
+    );
+
+  if (
+    !sorted.length
+  ) {
+    return "Команды пока не найдены.";
+  }
+
+  return (
+    "🧪 <b>Canonical teams</b>\n\n" +
+    sorted
+      .map(
+        (x) =>
+          `• ${escapeHtml(
+            x,
+          )}`,
+      )
+      .join(
+        "\n",
+      )
+  );
+}
+
 export class BotState
   extends DurableObject {
   constructor(
@@ -2197,90 +2449,85 @@ export class BotState
       env,
     );
 
-    this.ctx = ctx;
-    this.env = env;
+    this.ctx =
+      ctx;
+
+    this.env =
+      env;
   }
 
-  async getOwnerId() {
-    const configured =
-      String(
-        this.env
-          .ADMIN_USER_ID ||
-          "",
-      ).trim();
-
-    if (
-      configured
-    ) {
-      return Number(
-        configured,
-      );
-    }
-
-    return (
-      (
-        await this.ctx.storage.get(
-          "ownerId",
-        )
-      ) ?? null
-    );
-  }
-
-  async registerChat(chatId) {
-    const chats =
+  async registerChat(
+    chatId,
+  ) {
+    const stored =
       (
         await this.ctx.storage.get(
           "subscriberChatIds",
         )
       ) || [];
-  
-    const normalized =
-      [
-        ...new Set(
-          chats
-            .map(Number)
-            .filter(
-              (id) =>
-                Number.isFinite(id) &&
-                id !== 0,
-            ),
-        ),
-      ];
-  
-    const id =
-      Number(chatId);
-  
-    if (
-      Number.isFinite(id) &&
-      id !== 0 &&
-      !normalized.includes(id)
-    ) {
-      normalized.push(id);
-  
-      await this.ctx.storage.put(
-        "subscriberChatIds",
-        normalized,
-      );
-    }
-  
-    return normalized;
-  }
-  
-  async getSubscriberChats() {
-    const chats =
-      (
-        await this.ctx.storage.get(
-          "subscriberChatIds",
-        )
-      ) || [];
-  
-    return [
+
+    const chats = [
       ...new Set(
-        chats
-          .map(Number)
+        stored
+          .map(
+            Number,
+          )
           .filter(
             (id) =>
-              Number.isFinite(id) &&
+              Number.isFinite(
+                id,
+              ) &&
+              id !== 0,
+          ),
+      ),
+    ];
+
+    const id =
+      Number(
+        chatId,
+      );
+
+    if (
+      Number.isFinite(
+        id,
+      ) &&
+      id !== 0 &&
+      !chats.includes(
+        id,
+      )
+    ) {
+      chats.push(
+        id,
+      );
+
+      await this.ctx.storage.put(
+        "subscriberChatIds",
+        chats,
+      );
+    }
+
+    return chats;
+  }
+
+  async getSubscriberChats() {
+    const stored =
+      (
+        await this.ctx.storage.get(
+          "subscriberChatIds",
+        )
+      ) || [];
+
+    return [
+      ...new Set(
+        stored
+          .map(
+            Number,
+          )
+          .filter(
+            (id) =>
+              Number.isFinite(
+                id,
+              ) &&
               id !== 0,
           ),
       ),
@@ -2308,7 +2555,8 @@ export class BotState
         await this.ctx.storage.get(
           "knownTeamIds",
         )
-      ) || SEED_TEAM_IDS;
+      ) ||
+      SEED_TEAM_IDS;
 
     const incoming =
       await fetchCurrentTIGames(
@@ -2323,7 +2571,6 @@ export class BotState
             Number(
               g.matchId,
             ),
-
             g,
           ],
         ),
@@ -2391,17 +2638,37 @@ export class BotState
         newSnapshot,
       );
 
+    const subscriberChats =
+      await this.getSubscriberChats();
+
     if (
       notify &&
       changes &&
-      ownerId
+      subscriberChats.length
     ) {
-      await sendTelegram(
-        this.env,
-        ownerId,
-        changes,
-        telegramKeyboard(),
-      );
+      for (
+        const subscriberChatId
+        of subscriberChats
+      ) {
+        try {
+          await sendTelegram(
+            this.env,
+
+            subscriberChatId,
+
+            changes,
+
+            telegramKeyboard(),
+          );
+        } catch (
+          error
+        ) {
+          console.error(
+            `Telegram notification failed for chat ${subscriberChatId}:`,
+            error,
+          );
+        }
+      }
     }
 
     return {
@@ -2423,7 +2690,8 @@ export class BotState
 
       knownTeams:
         incoming
-          .teamIds.length,
+          .teamIds
+          .length,
 
       changes:
         Boolean(
@@ -2436,16 +2704,15 @@ export class BotState
     notify = false,
   ) {
     try {
-      return (
-        await this.sync(
-          notify,
-        )
+      return await this.sync(
+        notify,
       );
     } catch (
       error
     ) {
       await this.ctx.storage.put(
         "lastError",
+
         String(
           error,
         ),
@@ -2484,14 +2751,6 @@ export class BotState
   async handleTelegram(
     update,
   ) {
-    /*
-     * Telegram может повторно
-     * прислать один и тот же update,
-     * если Worker долго отвечает.
-     *
-     * Запоминаем update_id ДО
-     * обращения к STRATZ.
-     */
     const updateId =
       Number(
         update?.update_id,
@@ -2529,28 +2788,33 @@ export class BotState
 
     const message =
       update?.message;
-    
-    if (!message) {
-      return { ok: true };
+
+    if (
+      !message
+    ) {
+      return {
+        ok: true,
+      };
     }
-    
+
     const chatId =
       Number(
-        message.chat?.id || 0,
+        message.chat?.id ||
+          0,
       );
-    
-    const userId =
-      Number(
-        message.from?.id || 0,
-      );
-    
+
     const text =
       String(
-        message.text || "",
+        message.text ||
+          "",
       ).trim();
-    
-    if (!chatId) {
-      return { ok: true };
+
+    if (
+      !chatId
+    ) {
+      return {
+        ok: true,
+      };
     }
 
     await this.registerChat(
@@ -2558,78 +2822,49 @@ export class BotState
     );
 
     if (
-      text === "/start"
+      text ===
+      "/start"
     ) {
-      await this.registerChat(
-        chatId,
-      );
-    
       const games =
         await this.getGames();
-    
+
       await sendTelegram(
         this.env,
-    
+
         chatId,
-    
+
         "🏆 <b>TI 2026 Prediction Bot</b>\n\n" +
-          "Бот следит за The International 2026 через <b>STRATZ</b>.\n\n" +
+          "Бот следит за The International 2026 через <b>STRATZ</b>.\n" +
+          "Все функции доступны всем пользователям и группам.\n\n" +
           "📊 <b>Статус</b> — текущее состояние прогнозов\n" +
           "🎯 <b>Мои прогнозы</b> — полный список прогнозов\n" +
           "🎮 <b>Результаты серий</b> — сыгранные серии по дням\n" +
           "🔄 <b>Проверить сейчас</b> — обновить данные STRATZ\n\n" +
           `Сейчас сохранено карт: <b>${games.length}</b>`,
-    
+
         telegramKeyboard(),
       );
-    
+
       return {
         ok: true,
       };
     }
 
-    const subscriberChats =
-      await this.getSubscriberChats();
-    
     if (
-      notify &&
-      changes &&
-      subscriberChats.length
+      text ===
+        "/predictions" ||
+      text ===
+        "🎯 Мои прогнозы"
     ) {
-      const failedChats = [];
-    
-      for (
-        const chatId
-        of subscriberChats
-      ) {
-        try {
-          await sendTelegram(
-            this.env,
-            chatId,
-            changes,
-            telegramKeyboard(),
-          );
-        } catch (error) {
-          console.error(
-            `Telegram notification failed for chat ${chatId}:`,
-            error,
-          );
-    
-          failedChats.push(
-            chatId,
-          );
-        }
-      }
-    
-      /*
-       * Если пользователь заблокировал бота
-       * или чат больше недоступен —
-       * пока просто логируем ошибку.
-       *
-       * Позже можем сделать автоматическое
-       * удаление таких chatId.
-       */
-    }
+      await sendTelegram(
+        this.env,
+
+        chatId,
+
+        predictionsText(),
+
+        telegramKeyboard(),
+      );
 
       return {
         ok: true,
@@ -2642,12 +2877,6 @@ export class BotState
       text ===
         "📊 Статус"
     ) {
-      /*
-       * На /status не заставляем
-       * пользователя ждать STRATZ.
-       * Показываем уже сохранённое
-       * состояние.
-       */
       const games =
         await this.getGames();
 
@@ -2667,7 +2896,9 @@ export class BotState
 
           chatId,
 
-          `⚠️ Пока нет сохранённых матчей TI 2026.\nПоследняя ошибка:\n<code>${escapeHtml(error)}</code>`,
+          `⚠️ Пока нет сохранённых матчей TI 2026.\nПоследняя ошибка:\n<code>${escapeHtml(
+            error,
+          )}</code>`,
 
           telegramKeyboard(),
         );
@@ -2691,10 +2922,13 @@ export class BotState
     }
 
     if (
-        text === "/matches" ||
-        text === "🎮 Результаты серий" ||
-        text === "🎮 Последние матчи"
-      ) {
+      text ===
+        "/matches" ||
+      text ===
+        "🎮 Результаты серий" ||
+      text ===
+        "🎮 Последние матчи"
+    ) {
       await sendTelegram(
         this.env,
 
@@ -2712,15 +2946,9 @@ export class BotState
       };
     }
 
-    /*
-     * DEBUG:
-     * показывает реальные canonical
-     * названия всех команд,
-     * присутствующих в сохранённых
-     * картах.
-     */
     if (
-      text === "/teams"
+      text ===
+      "/teams"
     ) {
       await sendTelegram(
         this.env,
@@ -2740,12 +2968,89 @@ export class BotState
     }
 
     if (
-      text === "/check" ||
-      text === "🔄 Проверить сейчас"
+      text ===
+        "/check" ||
+      text ===
+        "🔄 Проверить сейчас"
     ) {
+      const now =
+        Date.now();
+
+      const lastManualCheckAt =
+        Number(
+          (
+            await this.ctx.storage.get(
+              "lastManualCheckAt",
+            )
+          ) || 0,
+        );
+
+      const elapsed =
+        now -
+        lastManualCheckAt;
+
+      if (
+        lastManualCheckAt >
+          0 &&
+        elapsed <
+          CHECK_COOLDOWN_MS
+      ) {
+        const secondsLeft =
+          Math.max(
+            1,
+
+            Math.ceil(
+              (
+                CHECK_COOLDOWN_MS -
+                elapsed
+              ) /
+                1000,
+            ),
+          );
+
+        const games =
+          await this.getGames();
+
+        await sendTelegram(
+          this.env,
+
+          chatId,
+
+          `⏱ Данные уже недавно обновлялись. Новую проверку можно запустить через <b>${secondsLeft} сек.</b>`,
+
+          telegramKeyboard(),
+        );
+
+        if (
+          games.length
+        ) {
+          await sendTelegram(
+            this.env,
+
+            chatId,
+
+            statusText(
+              games,
+            ),
+
+            telegramKeyboard(),
+          );
+        }
+
+        return {
+          ok: true,
+          cooldown: true,
+        };
+      }
+
+      await this.ctx.storage.put(
+        "lastManualCheckAt",
+        now,
+      );
+
       const checkStartedAt =
         Date.now();
-    
+
       await sendTelegram(
         this.env,
 
@@ -2762,13 +3067,15 @@ export class BotState
         );
 
       const checkSeconds =
-      (
         (
-          Date.now() -
-          checkStartedAt
-        ) /
-        1000
-      ).toFixed(1);
+          (
+            Date.now() -
+            checkStartedAt
+          ) /
+            1000
+        ).toFixed(
+          1,
+        );
 
       const games =
         await this.getGames();
@@ -2779,15 +3086,17 @@ export class BotState
         chatId,
 
         result.error
-          ? `⚠️ Проверка закончилась с ошибкой:\n<code>${escapeHtml(result.error)}</code>`
+          ? `⚠️ Проверка закончилась с ошибкой:\n<code>${escapeHtml(
+              result.error,
+            )}</code>`
 
           : `✅ Готово.
-            Источник: <b>STRATZ</b>
-            League ID: <code>${LEAGUE_ID}</code>
-            Карт сохранено: <b>${result.games}</b>
-            Новых карт: <b>${result.newGames}</b>
-            Известно team ID: <b>${result.knownTeams}</b>
-            Время проверки: <b>${checkSeconds} сек.</b>`,
+Источник: <b>STRATZ</b>
+League ID: <code>${LEAGUE_ID}</code>
+Карт сохранено: <b>${result.games}</b>
+Новых карт: <b>${result.newGames}</b>
+Известно team ID: <b>${result.knownTeams}</b>
+Время проверки: <b>${checkSeconds} сек.</b>`,
 
         telegramKeyboard(),
       );
@@ -2908,9 +3217,9 @@ export class BotState
           ).length,
 
         subscribers:
-        (
-          await this.getSubscriberChats()
-        ).length,
+          (
+            await this.getSubscriberChats()
+          ).length,
 
         lastSync:
           (
