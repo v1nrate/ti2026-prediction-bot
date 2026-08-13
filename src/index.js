@@ -2522,33 +2522,29 @@ export class BotState
 
     const message =
       update?.message;
-
-    if (
-      !message?.chat
-        ?.id ||
-      !message?.from
-        ?.id
-    ) {
-      return {
-        ok: true,
-      };
+    
+    if (!message) {
+      return { ok: true };
     }
-
+    
     const chatId =
       Number(
-        message.chat.id,
+        message.chat?.id || 0,
       );
-
+    
     const userId =
       Number(
-        message.from.id,
+        message.from?.id || 0,
       );
-
+    
     const text =
       String(
-        message.text ||
-          "",
+        message.text || "",
       ).trim();
+    
+    if (!chatId) {
+      return { ok: true };
+    }
 
     if (
       text === "/start"
