@@ -1063,49 +1063,26 @@ function recentGamesText(
   let index = 1;
 
   for (const s of sorted) {
-    const winner =
-      s.winner;
-
-    const loser =
-      s.loser;
-
-    /*
-     * Показываем счёт именно
-     * в порядке победитель : проигравший.
-     */
+    const winner = s.winner;
+    const loser = s.loser;
+  
     let winnerScore;
     let loserScore;
-
-    if (
-      winner === s.teamA
-    ) {
-      winnerScore =
-        s.scoreA;
-
-      loserScore =
-        s.scoreB;
+  
+    if (winner === s.teamA) {
+      winnerScore = s.scoreA;
+      loserScore = s.scoreB;
     } else {
-      winnerScore =
-        s.scoreB;
-
-      loserScore =
-        s.scoreA;
+      winnerScore = s.scoreB;
+      loserScore = s.scoreA;
     }
-
+  
     lines.push(
-      `<b>${index}. ${escapeHtml(winner)} ${winnerScore}:${loserScore} ${escapeHtml(loser)}</b>`,
+      `${index}. ✅ <b>${escapeHtml(winner)}</b> ` +
+      `<b>${winnerScore}:${loserScore}</b> ` +
+      `${escapeHtml(loser)}`
     );
-
-    lines.push(
-      `✅ Победитель: ${escapeHtml(winner)}`,
-    );
-
-    lines.push(
-      `BO3 · series <code>${s.seriesId}</code>`,
-    );
-
-    lines.push("");
-
+  
     index += 1;
   }
 
@@ -1193,7 +1170,7 @@ function telegramKeyboard() {
       [
         {
           text:
-            "🎮 Последние матчи",
+            "🎮 Результаты серий",
         },
 
         {
@@ -2249,11 +2226,10 @@ export class BotState
     }
 
     if (
-      text ===
-        "/matches" ||
-      text ===
-        "🎮 Последние матчи"
-    ) {
+        text === "/matches" ||
+        text === "🎮 Результаты серий" ||
+        text === "🎮 Последние матчи"
+      ) {
       await sendTelegram(
         this.env,
 
