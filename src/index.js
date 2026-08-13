@@ -1519,111 +1519,90 @@ async function fetchTeamBatchHistory(
   );
 }
 
-async function fetchCurrentTIGames(env, knownIds) {
-  const known = new Set(
-    [...SEED_TEAM_IDS, ...(knownIds || [])]
-      .map(Number)
-      .filter((id) => Number.isFinite(id) && id > 0),
-  );
-
-  const processed = new Set();
+async function fetchCurrentTIGames(env) {
   const byId = new Map();
+  const teamIds = new Set();
 
-  let frontier = [...known];
+  for (let skip = 0; skip < 200; skip += 5) {
+    const query = `{
+      league(id: ${LEAGUE_ID}) {
+        id
+        matches(request: { take: 5, skip: ${skip} }) {
+          id
+          startDateTime
+          leagueId
+          radiantTeamId
+          direTeamId
+          didRadiantWin
 
-  for (
-    let round = 0;
-    round < MAX_DISCOVERY_ROUNDS && frontier.length;
-    round += 1
-  ) {
-    const currentRound = [
-      ...new Set(
-        frontier
-          .map(Number)
-          .filter(
-            (id) =>
-              Number.isFinite(id) &&
-              id > 0 &&
-              !processed.has(id),
-          ),
-      ),
-    ];
-
-    frontier = [];
-
-    for (
-      let offset = 0;
-      offset < currentRound.length;
-      offset += TEAM_BATCH_SIZE
-    ) {
-      const batch = currentRound.slice(
-        offset,
-        offset + TEAM_BATCH_SIZE,
-      );
-
-      if (!batch.length) {
-        continue;
-      }
-
-      for (const id of batch) {
-        processed.add(id);
-      }
-
-      const teams = await fetchTeamBatchHistory(
-        env,
-        batch,
-      );
-
-      for (const team of teams) {
-        for (const raw of team.matches || []) {
-          if (Number(raw.leagueId) !== LEAGUE_ID) {
-            continue;
+          radiantTeam {
+            id
+            name
           }
 
-          const game = parseStratzMatch(raw);
-
-          if (game) {
-            byId.set(
-              Number(game.matchId),
-              game,
-            );
-          }
-
-          const opponentIds = [
-            Number(
-              raw.radiantTeamId ||
-                raw.radiantTeam?.id ||
-                0,
-            ),
-
-            Number(
-              raw.direTeamId ||
-                raw.direTeam?.id ||
-                0,
-            ),
-          ];
-
-          for (const id of opponentIds) {
-            if (
-              Number.isFinite(id) &&
-              id > 0 &&
-              !known.has(id)
-            ) {
-              known.add(id);
-              frontier.push(id);
-            }
+          direTeam {
+            id
+            name
           }
         }
       }
+    }`;
+
+    const data = await stratzQuery(env, query);
+
+    const matches =
+      Array.isArray(data?.league?.matches)
+        ? data.league.matches
+        : [];
+
+    if (!matches.length) {
+      break;
     }
 
-    frontier = [
-      ...new Set(
-        frontier.filter(
-          (id) => !processed.has(Number(id)),
-        ),
-      ),
-    ];
+    for (const raw of matches) {
+      if (Number(raw.leagueId) !== LEAGUE_ID) {
+        continue;
+      }
+
+      const game = parseStratzMatch(raw);
+
+      if (game) {
+        byId.set(
+          Number(game.matchId),
+          game,
+        );
+      }
+
+      const radiantId = Number(
+        raw.radiantTeamId ||
+          raw.radiantTeam?.id ||
+          0,
+      );
+
+      const direId = Number(
+        raw.direTeamId ||
+          raw.direTeam?.id ||
+          0,
+      );
+
+      if (
+        Number.isFinite(radiantId) &&
+        radiantId > 0
+      ) {
+        teamIds.add(radiantId);
+      }
+
+      if (
+        Number.isFinite(direId) &&
+        direId > 0
+      ) {
+        teamIds.add(direId);
+      }
+    }
+
+    if (matches.length < 5) {
+      break;
+    }
   }
 
   return {
@@ -1633,7 +1612,7 @@ async function fetchCurrentTIGames(env, knownIds) {
         a.matchId - b.matchId,
     ),
 
-    teamIds: [...known],
+    teamIds: [...teamIds],
   };
 }
 
