@@ -1235,6 +1235,16 @@ async function stratzQuery(
     );
   }
 
+  console.log(
+    "=== STRATZ GRAPHQL QUERY START ===",
+  );
+
+  console.log(query);
+
+  console.log(
+    "=== STRATZ GRAPHQL QUERY END ===",
+  );
+
   const response =
     await fetch(
       STRATZ_GRAPHQL,
@@ -1263,6 +1273,8 @@ async function stratzQuery(
           }),
       },
     );
+
+  // дальше оставляешь весь свой текущий код
 
   const text =
     await response.text();
