@@ -53,6 +53,10 @@ const ALIASES = {
     "BOOMBOYS",
     "BOOM Esports",
     "BOOM",
+    "BetBoom Team",
+    "BetBoom",
+    "BETBOOM",
+    "BB Team",
   ],
 
   "Aurora Gaming": [
@@ -67,6 +71,10 @@ const ALIASES = {
 
   "Iron Wing": [
     "Iron Wing",
+    "1w Team",
+    "1W Team",
+    "1w",
+    "1W",
   ],
 
   "Vici Gaming": [
@@ -112,11 +120,15 @@ const ALIASES = {
   HULIGANI: [
     "HULIGANI",
     "Huligani",
+    "L1GA TEAM",
+    "L1GA Team",
+    "L1GA",
   ],
 
   "Team Resilience": [
     "Team Resilience",
     "Resilience",
+    "RESILIENCE",
   ],
 };
 
