@@ -2226,55 +2226,65 @@ export class BotState
     );
   }
 
-  async claimOwner(
-    userId,
-  ) {
-    const configured =
-      String(
-        this.env
-          .ADMIN_USER_ID ||
-          "",
-      ).trim();
-
-    if (
-      configured
-    ) {
-      return (
-        Number(
-          configured,
-        ) ===
-        Number(
-          userId,
+  async registerChat(chatId) {
+    const chats =
+      (
+        await this.ctx.storage.get(
+          "subscriberChatIds",
         )
-      );
-    }
-
-    const existing =
-      await this.ctx.storage.get(
-        "ownerId",
-      );
-
-    if (
-      existing == null
-    ) {
-      await this.ctx.storage.put(
-        "ownerId",
-        Number(
-          userId,
+      ) || [];
+  
+    const normalized =
+      [
+        ...new Set(
+          chats
+            .map(Number)
+            .filter(
+              (id) =>
+                Number.isFinite(id) &&
+                id !== 0,
+            ),
         ),
+      ];
+  
+    const id =
+      Number(chatId);
+  
+    if (
+      Number.isFinite(id) &&
+      id !== 0 &&
+      !normalized.includes(id)
+    ) {
+      normalized.push(id);
+  
+      await this.ctx.storage.put(
+        "subscriberChatIds",
+        normalized,
       );
-
-      return true;
     }
-
-    return (
-      Number(
-        existing,
-      ) ===
-      Number(
-        userId,
-      )
-    );
+  
+    return normalized;
+  }
+  
+  async getSubscriberChats() {
+    const chats =
+      (
+        await this.ctx.storage.get(
+          "subscriberChatIds",
+        )
+      ) || [];
+  
+    return [
+      ...new Set(
+        chats
+          .map(Number)
+          .filter(
+            (id) =>
+              Number.isFinite(id) &&
+              id !== 0,
+          ),
+      ),
+    ];
   }
 
   async getGames() {
@@ -2380,9 +2390,6 @@ export class BotState
         oldSnapshot,
         newSnapshot,
       );
-
-    const ownerId =
-      await this.getOwnerId();
 
     if (
       notify &&
@@ -2546,64 +2553,83 @@ export class BotState
       return { ok: true };
     }
 
+    await this.registerChat(
+      chatId,
+    );
+
     if (
       text === "/start"
     ) {
-      const allowed =
-        await this.claimOwner(
-          userId,
-        );
-
-      if (
-        !allowed
-      ) {
-        return {
-          ok: true,
-        };
-      }
-
-      const sync =
-        await this.safeSync(
-          false,
-        );
-
+      await this.registerChat(
+        chatId,
+      );
+    
+      const games =
+        await this.getGames();
+    
       await sendTelegram(
         this.env,
-
+    
         chatId,
-
+    
         "🏆 <b>TI 2026 Prediction Bot</b>\n\n" +
-          "Источник матчей: <b>STRATZ</b>.\n" +
-          "Я автоматически проверяю турнир каждые 5 минут и сообщаю, когда состояние твоих прогнозов меняется.\n\n" +
-          `Твой Telegram ID: <code>${userId}</code>\n` +
-          `Сейчас сохранено карт: <b>${sync.games}</b>`,
-
+          "Бот следит за The International 2026 через <b>STRATZ</b>.\n\n" +
+          "📊 <b>Статус</b> — текущее состояние прогнозов\n" +
+          "🎯 <b>Мои прогнозы</b> — полный список прогнозов\n" +
+          "🎮 <b>Результаты серий</b> — сыгранные серии по дням\n" +
+          "🔄 <b>Проверить сейчас</b> — обновить данные STRATZ\n\n" +
+          `Сейчас сохранено карт: <b>${games.length}</b>`,
+    
         telegramKeyboard(),
       );
-
+    
       return {
         ok: true,
       };
     }
 
-    const ownerId =
-      await this.getOwnerId();
-
+    const subscriberChats =
+      await this.getSubscriberChats();
+    
     if (
-      text ===
-        "/predictions" ||
-      text ===
-        "🎯 Мои прогнозы"
+      notify &&
+      changes &&
+      subscriberChats.length
     ) {
-      await sendTelegram(
-        this.env,
-
-        chatId,
-
-        predictionsText(),
-
-        telegramKeyboard(),
-      );
+      const failedChats = [];
+    
+      for (
+        const chatId
+        of subscriberChats
+      ) {
+        try {
+          await sendTelegram(
+            this.env,
+            chatId,
+            changes,
+            telegramKeyboard(),
+          );
+        } catch (error) {
+          console.error(
+            `Telegram notification failed for chat ${chatId}:`,
+            error,
+          );
+    
+          failedChats.push(
+            chatId,
+          );
+        }
+      }
+    
+      /*
+       * Если пользователь заблокировал бота
+       * или чат больше недоступен —
+       * пока просто логируем ошибку.
+       *
+       * Позже можем сделать автоматическое
+       * удаление таких chatId.
+       */
+    }
 
       return {
         ok: true,
@@ -2881,8 +2907,10 @@ export class BotState
             SEED_TEAM_IDS
           ).length,
 
-        ownerId:
-          await this.getOwnerId(),
+        subscribers:
+        (
+          await this.getSubscriberChats()
+        ).length,
 
         lastSync:
           (
