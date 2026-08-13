@@ -1519,160 +1519,139 @@ async function fetchTeamBatchHistory(
   );
 }
 
-async function fetchCurrentTIGames(
-  env,
-  knownIds,
-) {
-  const known =
-    new Set(
-      [
-        ...SEED_TEAM_IDS,
-        ...(knownIds || []),
-      ].map(Number),
-    );
+async function fetchCurrentTIGames(env, knownIds) {
+  const known = new Set(
+    [...SEED_TEAM_IDS, ...(knownIds || [])]
+      .map(Number)
+      .filter((id) => Number.isFinite(id) && id > 0),
+  );
 
-  const processed =
-    new Set();
+  const processed = new Set();
+  const byId = new Map();
 
-  const byId =
-    new Map();
-
-  let frontier = [
-    ...known,
-  ];
+  let frontier = [...known];
 
   for (
     let round = 0;
-
-    round <
-      MAX_DISCOVERY_ROUNDS &&
-    frontier.length;
-
+    round < MAX_DISCOVERY_ROUNDS && frontier.length;
     round += 1
   ) {
-    const batch =
-      frontier
-        .filter(
+    /*
+     * ВАЖНО:
+     * теперь за один discovery round мы проходим
+     * ВСЕ найденные команды, просто пачками по 5.
+     *
+     * Раньше бралась только одна пачка из 5 команд,
+     * поэтому часть участников могла вообще
+     * не дойти до STRATZ.
+     */
+    const currentRound = [
+      ...new Set(
+        frontier.filter(
           (id) =>
-            !processed.has(
-              id,
-            ),
-        )
-        .slice(
-          0,
-          TEAM_BATCH_SIZE,
-        );
-
-    if (
-      !batch.length
-    ) {
-      break;
-    }
-
-    batch.forEach(
-      (id) =>
-        processed.add(
-          id,
+            Number.isFinite(Number(id)) &&
+            Number(id) > 0 &&
+            !processed.has(Number(id)),
         ),
-    );
+      ),
+    ];
 
-    const teams =
-      await fetchTeamBatchHistory(
+    frontier = [];
+
+    for (
+      let offset = 0;
+      offset < currentRound.length;
+      offset += TEAM_BATCH_SIZE
+    ) {
+      const batch = currentRound.slice(
+        offset,
+        offset + TEAM_BATCH_SIZE,
+      );
+
+      if (!batch.length) {
+        continue;
+      }
+
+      for (const id of batch) {
+        processed.add(Number(id));
+      }
+
+      const teams = await fetchTeamBatchHistory(
         env,
         batch,
       );
 
-    const next = [];
-
-    for (
-      const team
-      of teams
-    ) {
-      for (
-        const raw
-        of team.matches ||
-        []
-      ) {
-        if (
-          Number(
-            raw.leagueId,
-          ) !==
-          LEAGUE_ID
-        ) {
-          continue;
-        }
-
-        const game =
-          parseStratzMatch(
-            raw,
+      for (const team of teams) {
+        for (const raw of team.matches || []) {
+          const radiantId = Number(
+            raw.radiantTeamId ||
+              raw.radiantTeam?.id ||
+              0,
           );
 
-        if (game) {
-          byId.set(
-            game.matchId,
-            game,
+          const direId = Number(
+            raw.direTeamId ||
+              raw.direTeam?.id ||
+              0,
           );
-        }
 
-        for (
-          const id
-          of [
-            raw.radiantTeamId,
-            raw.direTeamId,
-          ]
-        ) {
-          const n =
-            Number(id);
+          /*
+           * Сохраняем только матчи TI 2026,
+           * но соперников обнаруживаем именно
+           * из матчей нужной лиги.
+           */
+          if (Number(raw.leagueId) !== LEAGUE_ID) {
+            continue;
+          }
 
-          if (
-            Number.isFinite(
-              n,
-            ) &&
-            n > 0 &&
-            !known.has(
-              n,
-            )
-          ) {
-            known.add(
-              n,
+          const game = parseStratzMatch(raw);
+
+          if (game) {
+            byId.set(
+              Number(game.matchId),
+              game,
             );
+          }
 
-            next.push(
-              n,
-            );
+          for (const id of [
+            radiantId,
+            direId,
+          ]) {
+            if (
+              Number.isFinite(id) &&
+              id > 0 &&
+              !known.has(id)
+            ) {
+              known.add(id);
+
+              /*
+               * Эту новую команду обработаем
+               * в следующем discovery round.
+               */
+              frontier.push(id);
+            }
           }
         }
       }
     }
 
     frontier = [
-      ...new Set([
-        ...frontier.filter(
-          (id) =>
-            !processed.has(
-              id,
-            ),
+      ...new Set(
+        frontier.filter(
+          (id) => !processed.has(Number(id)),
         ),
-
-        ...next,
-      ]),
+      ),
     ];
   }
 
   return {
-    games: [
-      ...byId.values(),
-    ].sort(
+    games: [...byId.values()].sort(
       (a, b) =>
-        a.startTime -
-          b.startTime ||
-        a.matchId -
-          b.matchId,
+        a.startTime - b.startTime ||
+        a.matchId - b.matchId,
     ),
 
-    teamIds: [
-      ...known,
-    ],
+    teamIds: [...known],
   };
 }
 
