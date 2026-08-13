@@ -116,31 +116,129 @@ function pairKey(game) {
 }
 
 function buildSeries(games) {
-  const sorted = [...games].sort(
-    (a, b) => a.startTime - b.startTime || a.matchId - b.matchId,
-  );
-  const clusters = [];
+  const groupedByPair = new Map();
 
-  for (const game of sorted) {
+  for (const game of games) {
     const pair = pairKey(game);
-    const last = clusters.at(-1);
-    const sameSeries =
-      last &&
-      last.pair === pair &&
-      game.startTime - last.lastTime <= 4 * 3600;
 
-    if (sameSeries) {
-      last.games.push(game);
-      last.lastTime = game.startTime;
-    } else {
-      clusters.push({
-        pair,
-        firstTime: game.startTime,
-        lastTime: game.startTime,
-        games: [game],
+    if (!groupedByPair.has(pair)) {
+      groupedByPair.set(pair, []);
+    }
+
+    groupedByPair.get(pair).push(game);
+  }
+
+  const preliminary = [];
+
+  for (const [pair, pairGames] of groupedByPair.entries()) {
+    const sorted = [...pairGames].sort(
+      (a, b) => a.startTime - b.startTime || a.matchId - b.matchId,
+    );
+
+    const clusters = [];
+    let current = [];
+
+    for (const game of sorted) {
+      if (!current.length) {
+        current.push(game);
+        continue;
+      }
+
+      const previous = current[current.length - 1];
+
+      if (game.startTime - previous.startTime <= 4 * 3600) {
+        current.push(game);
+      } else {
+        clusters.push(current);
+        current = [game];
+      }
+    }
+
+    if (current.length) {
+      clusters.push(current);
+    }
+
+    for (const items of clusters) {
+      const teams = [
+        ...new Set(items.flatMap((x) => [x.radiant, x.dire])),
+      ].sort();
+
+      if (teams.length !== 2) continue;
+
+      const [a, b] = teams;
+
+      const scoreA = items.filter((x) => x.winner === a).length;
+      const scoreB = items.filter((x) => x.winner === b).length;
+
+      if (Math.max(scoreA, scoreB) < 2) continue;
+
+      const winner = scoreA > scoreB ? a : b;
+      const loser = winner === a ? b : a;
+
+      preliminary.push({
+        key: `${pair}:${items[0].startTime}`,
+        startTime: items[0].startTime,
+        teamA: a,
+        teamB: b,
+        scoreA,
+        scoreB,
+        winner,
+        loser,
       });
     }
   }
+
+  preliminary.sort(
+    (a, b) => a.startTime - b.startTime || a.key.localeCompare(b.key),
+  );
+
+  const states = new Map();
+  const results = [];
+
+  const stateFor = (team) => {
+    if (!states.has(team)) {
+      states.set(team, emptyTeamState(team));
+    }
+
+    return states.get(team);
+  };
+
+  for (const s of preliminary) {
+    const a = stateFor(s.teamA);
+    const b = stateFor(s.teamB);
+
+    const aReady =
+      a.swissWins + a.swissLosses >= 5 &&
+      (
+        (a.swissWins === 3 && a.swissLosses === 2) ||
+        (a.swissWins === 2 && a.swissLosses === 3)
+      );
+
+    const bReady =
+      b.swissWins + b.swissLosses >= 5 &&
+      (
+        (b.swissWins === 3 && b.swissLosses === 2) ||
+        (b.swissWins === 2 && b.swissLosses === 3)
+      );
+
+    const stage = aReady && bReady ? "elimination" : "swiss";
+
+    results.push({
+      ...s,
+      stage,
+    });
+
+    if (stage === "swiss") {
+      stateFor(s.winner).swissWins += 1;
+      stateFor(s.loser).swissLosses += 1;
+    } else {
+      stateFor(s.winner).eliminationResult = "won";
+      stateFor(s.loser).eliminationResult = "lost";
+    }
+  }
+
+  return results;
+}
 
   const preliminary = [];
   for (const cluster of clusters) {
