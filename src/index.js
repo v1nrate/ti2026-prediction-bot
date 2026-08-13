@@ -6,7 +6,7 @@ const STRATZ_GRAPHQL = "https://api.stratz.com/graphql";
 
 const TEAM_MATCH_TAKE = 5;
 const TEAM_BATCH_SIZE = 5;
-const MAX_MATCH_PAGES = 12;
+const MAX_MATCH_PAGES = 6;
 const MAX_DISCOVERY_ROUNDS = 6;
 
 const PREDICTIONS = [
@@ -231,6 +231,10 @@ function textResponse(
       },
     },
   );
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function emptyTeamState(team) {
@@ -1427,18 +1431,15 @@ async function fetchTeamBatchHistory(
   env,
   teamIds,
 ) {
-  const matchesByTeam =
-    new Map();
+  const matchesByTeam = new Map();
 
   for (
     let page = 0;
-    page <
-    MAX_MATCH_PAGES;
+    page < MAX_MATCH_PAGES;
     page += 1
   ) {
     const skip =
-      page *
-      TEAM_MATCH_TAKE;
+      page * TEAM_MATCH_TAKE;
 
     const teams =
       await fetchTeamsMatches(
@@ -1447,36 +1448,22 @@ async function fetchTeamBatchHistory(
         skip,
       );
 
-    if (
-      !teams.length
-    ) {
+    if (!teams.length) {
       break;
     }
 
-    let anyFullPage =
-      false;
+    let anyFullPage = false;
 
-    for (
-      const team
-      of teams
-    ) {
+    for (const team of teams) {
       const teamId =
-        Number(
-          team.id,
-        );
+        Number(team.id);
 
       const matches =
-        Array.isArray(
-          team.matches,
-        )
+        Array.isArray(team.matches)
           ? team.matches
           : [];
 
-      if (
-        !matchesByTeam.has(
-          teamId,
-        )
-      ) {
+      if (!matchesByTeam.has(teamId)) {
         matchesByTeam.set(
           teamId,
           [],
@@ -1485,40 +1472,30 @@ async function fetchTeamBatchHistory(
 
       matchesByTeam
         .get(teamId)
-        .push(
-          ...matches,
-        );
+        .push(...matches);
 
       if (
         matches.length ===
         TEAM_MATCH_TAKE
       ) {
-        anyFullPage =
-          true;
+        anyFullPage = true;
       }
     }
 
-    /*
-     * Если ни одна команда
-     * не заполнила страницу,
-     * старых матчей дальше,
-     * скорее всего, уже нет.
-     */
-    if (
-      !anyFullPage
-    ) {
+    if (!anyFullPage) {
       break;
     }
+
+    /*
+     * Не долбим STRATZ запросами подряд.
+     */
+    await sleep(350);
   }
 
   return [
-    ...matchesByTeam
-      .entries(),
+    ...matchesByTeam.entries(),
   ].map(
-    ([
-      id,
-      matches,
-    ]) => ({
+    ([id, matches]) => ({
       id,
       matches,
     }),
@@ -1928,8 +1905,36 @@ export class BotState
   async handleTelegram(
     update,
   ) {
+    const updateId =
+      Number(update?.update_id);
+  
+    if (Number.isFinite(updateId)) {
+      const lastUpdateId =
+        Number(
+          (
+            await this.ctx.storage.get(
+              "lastTelegramUpdateId",
+            )
+          ) ?? -1,
+        );
+  
+      if (updateId <= lastUpdateId) {
+        return {
+          ok: true,
+          duplicate: true,
+        };
+      }
+  
+      await this.ctx.storage.put(
+        "lastTelegramUpdateId",
+        updateId,
+      );
+    }
+  
     const message =
       update?.message;
+  
+    // дальше твой существующий код...
 
     if (
       !message?.chat
