@@ -1456,9 +1456,7 @@ async function fetchTeamsMatches(
     ),
   ];
 
-  if (
-    !ids.length
-  ) {
+  if (!ids.length) {
     return [];
   }
 
@@ -1477,43 +1475,44 @@ async function fetchTeamsMatches(
         startDateTime
         leagueId
         seriesId
-      
+
         radiantTeamId
         direTeamId
         didRadiantWin
-      
+
         radiantTeam {
           id
           name
         }
-      
+
         direTeam {
           id
           name
         }
-      
+
         series {
           id
           type
           leagueId
-      
+
           teamOneId
           teamTwoId
           teamOneWinCount
           teamTwoWinCount
           winningTeamId
-      
+
           teamOne {
             id
             name
           }
-      
+
           teamTwo {
             id
             name
           }
         }
       }
+    }
   }`;
 
   const data =
