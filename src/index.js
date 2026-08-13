@@ -268,141 +268,137 @@ function pairKey(game) {
 }
 
 function buildSeries(games) {
-  const groupedByPair = new Map();
+  const bySeriesId = new Map();
 
   for (const game of games) {
-    const pair = pairKey(game);
+    const s = game.series;
 
-    if (!groupedByPair.has(pair)) {
-      groupedByPair.set(pair, []);
+    if (
+      !game.seriesId ||
+      !s ||
+      Number(s.leagueId) !== LEAGUE_ID
+    ) {
+      continue;
     }
 
-    groupedByPair
-      .get(pair)
-      .push(game);
+    if (
+      s.type !== "BEST_OF_THREE"
+    ) {
+      continue;
+    }
+
+    bySeriesId.set(
+      Number(game.seriesId),
+      s,
+    );
   }
 
   const preliminary = [];
 
   for (
-    const [pair, pairGames]
-    of groupedByPair.entries()
+    const [
+      seriesId,
+      s,
+    ]
+    of bySeriesId.entries()
   ) {
-    const sorted = [
-      ...pairGames,
-    ].sort(
-      (a, b) =>
-        a.startTime -
-          b.startTime ||
-        a.matchId -
-          b.matchId,
-    );
+    const teamA =
+      canonicalTeam(
+        s.teamOne,
+      );
 
-    const clusters = [];
-    let current = [];
+    const teamB =
+      canonicalTeam(
+        s.teamTwo,
+      );
 
-    for (const game of sorted) {
-      if (!current.length) {
-        current = [game];
-        continue;
-      }
+    const scoreA =
+      Number(
+        s.teamOneWinCount || 0,
+      );
 
-      const previous =
-        current[current.length - 1];
+    const scoreB =
+      Number(
+        s.teamTwoWinCount || 0,
+      );
 
-      const sameSeriesWindow =
-        game.startTime -
-          previous.startTime <=
-        4 * 3600;
+    const winningTeamId =
+      Number(
+        s.winningTeamId || 0,
+      );
 
-      if (sameSeriesWindow) {
-        current.push(game);
-      } else {
-        clusters.push(current);
-        current = [game];
-      }
+    if (
+      !teamA ||
+      !teamB ||
+      teamA === "Unknown" ||
+      teamB === "Unknown"
+    ) {
+      continue;
     }
 
-    if (current.length) {
-      clusters.push(current);
-    }
-
-    for (const items of clusters) {
-      const teams = [
-        ...new Set(
-          items.flatMap(
-            (x) => [
-              x.radiant,
-              x.dire,
-            ],
-          ),
-        ),
-      ].sort();
-
-      if (teams.length !== 2) {
-        continue;
-      }
-
-      const [a, b] = teams;
-
-      const scoreA =
-        items.filter(
-          (x) =>
-            x.winner === a,
-        ).length;
-
-      const scoreB =
-        items.filter(
-          (x) =>
-            x.winner === b,
-        ).length;
-
-      if (
-        Math.max(
-          scoreA,
-          scoreB,
-        ) < 2
-      ) {
-        continue;
-      }
-
-      const winner =
-        scoreA > scoreB
-          ? a
-          : b;
-
-      const loser =
-        winner === a
-          ? b
-          : a;
-
-      preliminary.push({
-        key:
-          `${pair}:` +
-          `${items[0].startTime}`,
-
-        startTime:
-          items[0].startTime,
-
-        teamA: a,
-        teamB: b,
-
+    /*
+     * Для BO3 завершённая серия —
+     * кто-то набрал 2 победы.
+     */
+    if (
+      Math.max(
         scoreA,
         scoreB,
-
-        winner,
-        loser,
-      });
+      ) < 2 ||
+      !winningTeamId
+    ) {
+      continue;
     }
+
+    const winner =
+      winningTeamId ===
+      Number(s.teamOneId)
+        ? teamA
+        : winningTeamId ===
+          Number(s.teamTwoId)
+        ? teamB
+        : null;
+
+    if (!winner) {
+      continue;
+    }
+
+    const loser =
+      winner === teamA
+        ? teamB
+        : teamA;
+
+    preliminary.push({
+      key:
+        `series:${seriesId}`,
+
+      seriesId,
+
+      startTime:
+        0,
+
+      teamA,
+      teamB,
+
+      scoreA,
+      scoreB,
+
+      winner,
+      loser,
+    });
   }
 
+  /*
+   * Пока порядок можно взять
+   * по seriesId.
+   * Позже можем сохранить
+   * lastMatchDateTime из SeriesType
+   * и сортировать по нему.
+   */
   preliminary.sort(
     (a, b) =>
-      a.startTime -
-        b.startTime ||
-      a.key.localeCompare(
-        b.key,
-      ),
+      a.seriesId -
+      b.seriesId,
   );
 
   const states =
@@ -410,16 +406,19 @@ function buildSeries(games) {
 
   const results = [];
 
-  const stateFor = (team) => {
-    if (!states.has(team)) {
-      states.set(
-        team,
-        emptyTeamState(team),
-      );
-    }
+  const stateFor =
+    (team) => {
+      if (
+        !states.has(team)
+      ) {
+        states.set(
+          team,
+          emptyTeamState(team),
+        );
+      }
 
-    return states.get(team);
-  };
+      return states.get(team);
+    };
 
   for (const s of preliminary) {
     const a =
@@ -1349,7 +1348,55 @@ function parseStratzMatch(
       Number(raw.id),
 
     seriesId:
-      null,
+      raw.seriesId
+        ? Number(raw.seriesId)
+        : null,
+    
+    series:
+      raw.series
+        ? {
+            id: Number(raw.series.id),
+    
+            type:
+              raw.series.type || null,
+    
+            leagueId:
+              Number(raw.series.leagueId || 0),
+    
+            teamOneId:
+              Number(raw.series.teamOneId || 0),
+    
+            teamTwoId:
+              Number(raw.series.teamTwoId || 0),
+    
+            teamOne:
+              canonicalTeam(
+                raw.series.teamOne?.name,
+              ),
+    
+            teamTwo:
+              canonicalTeam(
+                raw.series.teamTwo?.name,
+              ),
+    
+            teamOneWinCount:
+              Number(
+                raw.series.teamOneWinCount || 0,
+              ),
+    
+            teamTwoWinCount:
+              Number(
+                raw.series.teamTwoWinCount || 0,
+              ),
+    
+            winningTeamId:
+              raw.series.winningTeamId
+                ? Number(
+                    raw.series.winningTeamId,
+                  )
+                : null,
+          }
+        : null,
 
     startTime:
       Number(
@@ -1429,23 +1476,44 @@ async function fetchTeamsMatches(
         id
         startDateTime
         leagueId
-
+        seriesId
+      
         radiantTeamId
         direTeamId
-
         didRadiantWin
-
+      
         radiantTeam {
           id
           name
         }
-
+      
         direTeam {
           id
           name
         }
+      
+        series {
+          id
+          type
+          leagueId
+      
+          teamOneId
+          teamTwoId
+          teamOneWinCount
+          teamTwoWinCount
+          winningTeamId
+      
+          teamOne {
+            id
+            name
+          }
+      
+          teamTwo {
+            id
+            name
+          }
+        }
       }
-    }
   }`;
 
   const data =
