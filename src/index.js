@@ -2,7 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 
 const LEAGUE_ID = 19719;
 const STRATZ_GRAPHQL = "https://api.stratz.com/graphql";
-const TEAM_MATCH_TAKE = 5;
+const TEAM_MATCH_TAKE = 4;
 const MAX_DISCOVERY_ROUNDS = 3;
 
 const PREDICTIONS = [
