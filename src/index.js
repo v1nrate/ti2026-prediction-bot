@@ -5,8 +5,8 @@ const STRATZ_GRAPHQL = "https://api.stratz.com/graphql";
 
 const TEAM_MATCH_TAKE = 5;
 const TEAM_BATCH_SIZE = 5;
-const MAX_MATCH_PAGES = 6;
-const MAX_DISCOVERY_ROUNDS = 4;
+const MAX_MATCH_PAGES = 12;
+const MAX_DISCOVERY_ROUNDS = 6;
 
 const PREDICTIONS = [
   { team: "Team Vision", kind: "4-0" },
