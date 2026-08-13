@@ -5,8 +5,6 @@ const STRATZ_GRAPHQL = "https://api.stratz.com/graphql";
 
 const TEAM_MATCH_TAKE = 5;
 const TEAM_BATCH_SIZE = 5;
-const MAX_MATCH_PAGES = 6;
-const MAX_DISCOVERY_ROUNDS = 6;
 
 const PREDICTIONS = [
   { team: "Team Vision", kind: "4-0" },
@@ -1458,14 +1456,15 @@ function parseStratzMatch(
 async function fetchTeamsMatches(
   env,
   teamIds,
-  skip = 0,
 ) {
   const ids = [
     ...new Set(
       teamIds
         .map(Number)
         .filter(
-          Number.isFinite,
+          (id) =>
+            Number.isFinite(id) &&
+            id > 0,
         ),
     ),
   ];
@@ -1474,6 +1473,15 @@ async function fetchTeamsMatches(
     return [];
   }
 
+  /*
+   * Берём достаточно большой кусок истории
+   * одним запросом.
+   *
+   * Важно: STRATZ раньше ограничивал take=5
+   * на team.matches, поэтому оставляем 5.
+   * Быстродействие получаем не за счёт take,
+   * а за счёт отказа от пагинации/discovery.
+   */
   const query = `{
     teams(teamIds: [${ids.join(",")}]) {
       id
@@ -1481,8 +1489,8 @@ async function fetchTeamsMatches(
 
       matches(
         request: {
-          take: ${TEAM_MATCH_TAKE}
-          skip: ${skip}
+          take: 5
+          skip: 0
         }
       ) {
         id
@@ -1542,274 +1550,135 @@ async function fetchTeamsMatches(
     : [];
 }
 
-async function fetchTeamBatchHistory(
-  env,
-  teamIds,
-) {
-  const matchesByTeam =
-    new Map();
-
-  for (
-    let page = 0;
-    page <
-    MAX_MATCH_PAGES;
-    page += 1
-  ) {
-    const skip =
-      page *
-      TEAM_MATCH_TAKE;
-
-    const teams =
-      await fetchTeamsMatches(
-        env,
-        teamIds,
-        skip,
-      );
-
-    if (
-      !teams.length
-    ) {
-      break;
-    }
-
-    let anyFullPage =
-      false;
-
-    for (
-      const team
-      of teams
-    ) {
-      const teamId =
-        Number(
-          team.id,
-        );
-
-      const matches =
-        Array.isArray(
-          team.matches,
-        )
-          ? team.matches
-          : [];
-
-      if (
-        !matchesByTeam.has(
-          teamId,
-        )
-      ) {
-        matchesByTeam.set(
-          teamId,
-          [],
-        );
-      }
-
-      matchesByTeam
-        .get(teamId)
-        .push(
-          ...matches,
-        );
-
-      if (
-        matches.length ===
-        TEAM_MATCH_TAKE
-      ) {
-        anyFullPage =
-          true;
-      }
-    }
-
-    if (
-      !anyFullPage
-    ) {
-      break;
-    }
-
-    await sleep(350);
-  }
-
-  return [
-    ...matchesByTeam
-      .entries(),
-  ].map(
-    ([
-      id,
-      matches,
-    ]) => ({
-      id,
-      matches,
-    }),
-  );
-}
-
 async function fetchCurrentTIGames(
   env,
   knownIds,
 ) {
-  const known = new Set(
-    [
-      ...SEED_TEAM_IDS,
-      ...(knownIds || []),
-    ]
-      .map(Number)
-      .filter(
-        (id) =>
-          Number.isFinite(id) &&
-          id > 0,
-      ),
-  );
-
-  const processed =
-    new Set();
+  /*
+   * Больше НЕ делаем:
+   * - discovery rounds;
+   * - frontier;
+   * - пагинацию;
+   * - fetchTeamBatchHistory;
+   *
+   * Берём только известные нам команды.
+   */
+  const ids = [
+    ...new Set(
+      [
+        ...SEED_TEAM_IDS,
+        ...(knownIds || []),
+      ]
+        .map(Number)
+        .filter(
+          (id) =>
+            Number.isFinite(id) &&
+            id > 0,
+        ),
+    ),
+  ];
 
   const byId =
     new Map();
 
-  let frontier = [
-    ...known,
-  ];
+  const discoveredIds =
+    new Set(ids);
 
+  /*
+   * STRATZ нормально принимает несколько
+   * teamIds, но не будем делать огромный
+   * GraphQL на всякий случай.
+   *
+   * 5 команд на запрос.
+   * При 18 ID это всего 4 запроса.
+   */
   for (
-    let round = 0;
-
-    round <
-      MAX_DISCOVERY_ROUNDS &&
-    frontier.length;
-
-    round += 1
+    let offset = 0;
+    offset < ids.length;
+    offset += TEAM_BATCH_SIZE
   ) {
-    const currentRound = [
-      ...new Set(
-        frontier
-          .map(Number)
-          .filter(
-            (id) =>
-              Number.isFinite(id) &&
-              id > 0 &&
-              !processed.has(id),
-          ),
-      ),
-    ];
+    const batch =
+      ids.slice(
+        offset,
+        offset + TEAM_BATCH_SIZE,
+      );
 
-    frontier = [];
-
-    for (
-      let offset = 0;
-
-      offset <
-      currentRound.length;
-
-      offset +=
-        TEAM_BATCH_SIZE
-    ) {
-      const batch =
-        currentRound.slice(
-          offset,
-          offset +
-            TEAM_BATCH_SIZE,
-        );
-
-      if (
-        !batch.length
-      ) {
-        continue;
-      }
-
-      for (
-        const id
-        of batch
-      ) {
-        processed.add(id);
-      }
-
-      const teams =
-        await fetchTeamBatchHistory(
-          env,
-          batch,
-        );
-
-      for (
-        const team
-        of teams
-      ) {
-        for (
-          const raw
-          of team.matches ||
-          []
-        ) {
-          if (
-            Number(
-              raw.leagueId,
-            ) !==
-            LEAGUE_ID
-          ) {
-            continue;
-          }
-
-          const game =
-            parseStratzMatch(
-              raw,
-            );
-
-          if (
-            game
-          ) {
-            byId.set(
-              Number(
-                game.matchId,
-              ),
-              game,
-            );
-          }
-
-          const radiantId =
-            Number(
-              raw.radiantTeamId ||
-                raw.radiantTeam
-                  ?.id ||
-                0,
-            );
-
-          const direId =
-            Number(
-              raw.direTeamId ||
-                raw.direTeam
-                  ?.id ||
-                0,
-            );
-
-          for (
-            const id
-            of [
-              radiantId,
-              direId,
-            ]
-          ) {
-            if (
-              Number.isFinite(
-                id,
-              ) &&
-              id > 0 &&
-              !known.has(
-                id,
-              )
-            ) {
-              known.add(id);
-              frontier.push(id);
-            }
-          }
-        }
-      }
+    if (!batch.length) {
+      continue;
     }
 
-    frontier = [
-      ...new Set(
-        frontier.filter(
-          (id) =>
-            !processed.has(
-              Number(id),
-            ),
-        ),
-      ),
-    ];
+    const teams =
+      await fetchTeamsMatches(
+        env,
+        batch,
+      );
+
+    for (const team of teams) {
+      const teamId =
+        Number(team?.id || 0);
+
+      if (teamId > 0) {
+        discoveredIds.add(
+          teamId,
+        );
+      }
+
+      for (
+        const raw
+        of team?.matches || []
+      ) {
+        /*
+         * Соперников запоминаем для информации,
+         * но НЕ запускаем по ним новый discovery.
+         */
+        const radiantId =
+          Number(
+            raw.radiantTeamId ||
+              raw.radiantTeam?.id ||
+              0,
+          );
+
+        const direId =
+          Number(
+            raw.direTeamId ||
+              raw.direTeam?.id ||
+              0,
+          );
+
+        if (radiantId > 0) {
+          discoveredIds.add(
+            radiantId,
+          );
+        }
+
+        if (direId > 0) {
+          discoveredIds.add(
+            direId,
+          );
+        }
+
+        if (
+          Number(raw.leagueId) !==
+          LEAGUE_ID
+        ) {
+          continue;
+        }
+
+        const game =
+          parseStratzMatch(
+            raw,
+          );
+
+        if (!game) {
+          continue;
+        }
+
+        byId.set(
+          Number(game.matchId),
+          game,
+        );
+      }
+    }
   }
 
   return {
@@ -1824,7 +1693,7 @@ async function fetchCurrentTIGames(
     ),
 
     teamIds: [
-      ...known,
+      ...discoveredIds,
     ],
   };
 }
