@@ -70,10 +70,8 @@ const ALIASES = {
 
   "Iron Wing": [
     "Iron Wing",
-    "1w Team",
-    "1W Team",
-    "1w",
-    "1W",
+    "Tundra Esports",
+    "Tundra",
   ],
 
   "Vici Gaming": [
@@ -129,6 +127,8 @@ const ALIASES = {
     "Team Resilience",
     "Resilience",
     "RESILIENCE",
+    "EHOME.immortal",
+    "EHOME immortal",
   ],
 };
 
@@ -143,8 +143,10 @@ const SEED_TEAM_IDS = [
 
   9247354,  // Team Falcons
   8255888,  // BetBoom Team
-  9255039,  // 1w Team
   9964962,  // GamerLegion
+
+  10150413, // Tundra Esports -> Iron Wing
+  5017210,  // EHOME.immortal -> Team Resilience
 ];
 
 const KIND_LABEL = {
