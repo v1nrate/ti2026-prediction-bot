@@ -2243,11 +2243,12 @@ export class BotState
     }
 
     if (
-      text ===
-        "/check" ||
-      text ===
-        "🔄 Проверить сейчас"
+      text === "/check" ||
+      text === "🔄 Проверить сейчас"
     ) {
+      const checkStartedAt =
+        Date.now();
+    
       await sendTelegram(
         this.env,
 
@@ -2263,6 +2264,15 @@ export class BotState
           true,
         );
 
+      const checkSeconds =
+      (
+        (
+          Date.now() -
+          checkStartedAt
+        ) /
+        1000
+      ).toFixed(1);
+
       const games =
         await this.getGames();
 
@@ -2274,7 +2284,13 @@ export class BotState
         result.error
           ? `⚠️ Проверка закончилась с ошибкой:\n<code>${escapeHtml(result.error)}</code>`
 
-          : `✅ Готово.\nИсточник: <b>STRATZ</b>\nLeague ID: <code>${LEAGUE_ID}</code>\nКарт сохранено: <b>${result.games}</b>\nНовых карт: <b>${result.newGames}</b>\nНайдено команд: <b>${result.knownTeams}</b>`,
+          : `✅ Готово.
+            Источник: <b>STRATZ</b>
+            League ID: <code>${LEAGUE_ID}</code>
+            Карт сохранено: <b>${result.games}</b>
+            Новых карт: <b>${result.newGames}</b>
+            Известно team ID: <b>${result.knownTeams}</b>
+            Время проверки: <b>${checkSeconds} сек.</b>`,
 
         telegramKeyboard(),
       );
