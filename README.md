@@ -51,3 +51,5 @@ Deploy command:
     npx wrangler deploy
 
 Do not put BOT_TOKEN into GitHub.
+
+STRATZ deployment
