@@ -1741,12 +1741,20 @@ export class BotState
   ) {
     const existing =
       await this.getGames();
-
+  
+    const knownTeamIds =
+      (
+        await this.ctx.storage.get(
+          "knownTeamIds",
+        )
+      ) || SEED_TEAM_IDS;
+  
     const incoming =
-  await fetchCurrentTIGames(
-    this.env,
-  );
-
+      await fetchCurrentTIGames(
+        this.env,
+        knownTeamIds,
+      );
+  
     const byId =
       new Map(
         existing.map(
