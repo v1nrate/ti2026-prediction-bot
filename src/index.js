@@ -1025,43 +1025,100 @@ function changesText(
 
 function recentGamesText(
   games,
-  limit = 10,
+  limit = 20,
 ) {
-  if (
-    !games.length
-  ) {
+  const series =
+    buildSeries(games);
+
+  if (!series.length) {
     return (
-      "Пока ни одной карты TI 2026 не сохранено."
+      "Пока ни одной завершённой серии TI 2026 не найдено."
     );
   }
 
-  const sorted = [
-    ...games,
-  ]
-    .sort(
-      (a, b) =>
-        b.startTime -
-          a.startTime ||
-        b.matchId -
-          a.matchId,
-    )
-    .slice(
-      0,
-      limit,
-    );
+  /*
+   * Последние серии сверху.
+   *
+   * Сейчас buildSeries сортирует по seriesId
+   * по возрастанию, поэтому здесь просто
+   * разворачиваем.
+   */
+  const sorted =
+    [...series]
+      .sort(
+        (a, b) =>
+          b.seriesId -
+          a.seriesId,
+      )
+      .slice(
+        0,
+        limit,
+      );
 
   const lines = [
-    "🎮 <b>Последние карты TI 2026</b>",
+    "🎮 <b>TI 2026 — сыгранные серии</b>",
+    "",
   ];
 
-  for (
-    const g
-    of sorted
+  let index = 1;
+
+  for (const s of sorted) {
+    const winner =
+      s.winner;
+
+    const loser =
+      s.loser;
+
+    /*
+     * Показываем счёт именно
+     * в порядке победитель : проигравший.
+     */
+    let winnerScore;
+    let loserScore;
+
+    if (
+      winner === s.teamA
+    ) {
+      winnerScore =
+        s.scoreA;
+
+      loserScore =
+        s.scoreB;
+    } else {
+      winnerScore =
+        s.scoreB;
+
+      loserScore =
+        s.scoreA;
+    }
+
+    lines.push(
+      `<b>${index}. ${escapeHtml(winner)} ${winnerScore}:${loserScore} ${escapeHtml(loser)}</b>`,
+    );
+
+    lines.push(
+      `✅ Победитель: ${escapeHtml(winner)}`,
+    );
+
+    lines.push(
+      `BO3 · series <code>${s.seriesId}</code>`,
+    );
+
+    lines.push("");
+
+    index += 1;
+  }
+
+  lines.push(
+    `Завершено серий: <b>${series.length}</b>`,
+  );
+
+  if (
+    series.length >
+    sorted.length
   ) {
     lines.push(
-      `\n${g.radiantWin ? "✅" : "❌"} ${escapeHtml(g.radiant)}\n` +
-        `${g.radiantWin ? "❌" : "✅"} ${escapeHtml(g.dire)}\n` +
-        `match ${g.matchId}`,
+      `Показано последних: <b>${sorted.length}</b>`,
     );
   }
 
@@ -1069,7 +1126,6 @@ function recentGamesText(
     "\n",
   );
 }
-
 function teamsDebugText(games) {
   const teams = new Map();
 
