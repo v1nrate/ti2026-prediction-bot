@@ -270,6 +270,13 @@ function pairKey(game) {
 function buildSeries(games) {
   const bySeriesId = new Map();
 
+  /*
+   * Собираем серию + время последней известной карты.
+   *
+   * Это важно для старых матчей, которые уже лежат
+   * в Durable Object и были сохранены до появления
+   * series.lastMatchDateTime.
+   */
   for (const game of games) {
     const s = game.series;
 
@@ -281,16 +288,69 @@ function buildSeries(games) {
       continue;
     }
 
-    if (
-      s.type !== "BEST_OF_THREE"
-    ) {
+    if (s.type !== "BEST_OF_THREE") {
       continue;
     }
 
-    bySeriesId.set(
-      Number(game.seriesId),
-      s,
-    );
+    const seriesId =
+      Number(game.seriesId);
+
+    const gameTime =
+      Number(game.startTime || 0);
+
+    const stratzSeriesTime =
+      Number(
+        s.lastMatchDateTime || 0,
+      );
+
+    const existing =
+      bySeriesId.get(seriesId);
+
+    if (!existing) {
+      bySeriesId.set(
+        seriesId,
+        {
+          series: s,
+
+          lastGameTime:
+            gameTime,
+
+          stratzSeriesTime:
+            stratzSeriesTime,
+        },
+      );
+
+      continue;
+    }
+
+    /*
+     * Если одна серия встретилась несколько раз
+     * (по одной записи на каждую карту),
+     * сохраняем максимальное время.
+     */
+    existing.lastGameTime =
+      Math.max(
+        existing.lastGameTime,
+        gameTime,
+      );
+
+    existing.stratzSeriesTime =
+      Math.max(
+        existing.stratzSeriesTime,
+        stratzSeriesTime,
+      );
+
+    /*
+     * Берём наиболее свежую версию series,
+     * потому что в ней уже может быть
+     * финальный счёт 2:0 / 2:1.
+     */
+    if (
+      stratzSeriesTime >=
+      existing.stratzSeriesTime
+    ) {
+      existing.series = s;
+    }
   }
 
   const preliminary = [];
@@ -298,10 +358,13 @@ function buildSeries(games) {
   for (
     const [
       seriesId,
-      s,
+      entry,
     ]
     of bySeriesId.entries()
   ) {
+    const s =
+      entry.series;
+
     const teamA =
       canonicalTeam(
         s.teamOne,
@@ -337,8 +400,8 @@ function buildSeries(games) {
     }
 
     /*
-     * Для BO3 завершённая серия —
-     * кто-то набрал 2 победы.
+     * Завершённая BO3:
+     * одна из команд должна набрать 2 карты.
      */
     if (
       Math.max(
@@ -368,39 +431,50 @@ function buildSeries(games) {
         ? teamB
         : teamA;
 
+    /*
+     * Приоритет:
+     *
+     * 1. STRATZ series.lastMatchDateTime
+     * 2. startTime последней карты серии
+     *
+     * Поэтому даже старые записи больше
+     * никогда не превратятся в 01.01.1970.
+     */
+    const startTime =
+      entry.stratzSeriesTime > 0
+        ? entry.stratzSeriesTime
+        : entry.lastGameTime;
+
     preliminary.push({
       key:
         `series:${seriesId}`,
-    
+
       seriesId,
-    
-      startTime:
-        Number(
-          s.lastMatchDateTime || 0,
-        ),
-    
+
+      startTime,
+
       teamA,
       teamB,
-    
+
       scoreA,
       scoreB,
-    
+
       winner,
       loser,
     });
   }
 
   /*
-   * Пока порядок можно взять
-   * по seriesId.
-   * Позже можем сохранить
-   * lastMatchDateTime из SeriesType
-   * и сортировать по нему.
+   * ВАЖНО:
+   * теперь сортируем именно по времени,
+   * а не по seriesId.
    */
   preliminary.sort(
     (a, b) =>
+      a.startTime -
+        b.startTime ||
       a.seriesId -
-      b.seriesId,
+        b.seriesId,
   );
 
   const states =
@@ -410,9 +484,7 @@ function buildSeries(games) {
 
   const stateFor =
     (team) => {
-      if (
-        !states.has(team)
-      ) {
+      if (!states.has(team)) {
         states.set(
           team,
           emptyTeamState(team),
@@ -470,9 +542,7 @@ function buildSeries(games) {
       stage,
     });
 
-    if (
-      stage === "swiss"
-    ) {
+    if (stage === "swiss") {
       stateFor(
         s.winner,
       ).swissWins += 1;
