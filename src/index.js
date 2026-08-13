@@ -1,4 +1,3 @@
-// force-deploy-2258
 import { DurableObject } from "cloudflare:workers";
 
 const LEAGUE_ID = 19719;
@@ -123,6 +122,7 @@ const ALIASES = {
     "L1GA TEAM",
     "L1GA Team",
     "L1GA",
+    "L1ga",
   ],
 
   "Team Resilience": [
@@ -179,10 +179,7 @@ const STATUS_ICON = {
 
 const aliasMap = new Map();
 
-for (
-  const [canonical, aliases]
-  of Object.entries(ALIASES)
-) {
+for (const [canonical, aliases] of Object.entries(ALIASES)) {
   for (const alias of aliases) {
     aliasMap.set(
       normalizeName(alias),
@@ -198,7 +195,9 @@ function normalizeName(value) {
 }
 
 function canonicalTeam(value) {
-  if (!value) return "Unknown";
+  if (!value) {
+    return "Unknown";
+  }
 
   return (
     aliasMap.get(normalizeName(value)) ||
@@ -213,10 +212,7 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;");
 }
 
-function jsonResponse(
-  data,
-  status = 200,
-) {
+function jsonResponse(data, status = 200) {
   return new Response(
     JSON.stringify(data, null, 2),
     {
@@ -229,10 +225,7 @@ function jsonResponse(
   );
 }
 
-function textResponse(
-  text,
-  status = 200,
-) {
+function textResponse(text, status = 200) {
   return new Response(
     text,
     {
@@ -246,7 +239,9 @@ function textResponse(
 }
 
 function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise(
+    (resolve) => setTimeout(resolve, ms),
+  );
 }
 
 function emptyTeamState(team) {
@@ -304,7 +299,6 @@ function buildSeries(games) {
     );
 
     const clusters = [];
-
     let current = [];
 
     for (const game of sorted) {
@@ -363,14 +357,6 @@ function buildSeries(games) {
             x.winner === b,
         ).length;
 
-      /*
-       * Сейчас текущая стадия TI —
-       * серии BO3.
-       *
-       * Серия считается законченной,
-       * когда одна команда выиграла
-       * минимум 2 карты.
-       */
       if (
         Math.max(
           scoreA,
@@ -424,24 +410,18 @@ function buildSeries(games) {
 
   const results = [];
 
-  const stateFor =
-    (team) => {
-      if (
-        !states.has(team)
-      ) {
-        states.set(
-          team,
-          emptyTeamState(team),
-        );
-      }
+  const stateFor = (team) => {
+    if (!states.has(team)) {
+      states.set(
+        team,
+        emptyTeamState(team),
+      );
+    }
 
-      return states.get(team);
-    };
+    return states.get(team);
+  };
 
-  for (
-    const s
-    of preliminary
-  ) {
+  for (const s of preliminary) {
     const a =
       stateFor(s.teamA);
 
@@ -531,31 +511,23 @@ function calculateStates(games) {
     );
   }
 
-  const stateFor =
-    (team) => {
-      if (
-        !states.has(team)
-      ) {
-        states.set(
-          team,
-          emptyTeamState(
-            team,
-          ),
-        );
-      }
-
-      return states.get(
+  const stateFor = (team) => {
+    if (!states.has(team)) {
+      states.set(
         team,
+        emptyTeamState(
+          team,
+        ),
       );
-    };
+    }
+
+    return states.get(team);
+  };
 
   const series =
     buildSeries(games);
 
-  for (
-    const s
-    of series
-  ) {
+  for (const s of series) {
     const a =
       stateFor(
         s.teamA,
@@ -859,7 +831,8 @@ function makeSnapshot(
       );
 
     result[p.team] = {
-      kind: p.kind,
+      kind:
+        p.kind,
 
       swissWins:
         st.swissWins,
@@ -1098,6 +1071,55 @@ function recentGamesText(
   );
 }
 
+function teamsDebugText(games) {
+  const teams = new Map();
+
+  for (const g of games) {
+    for (
+      const team
+      of [
+        g.radiant,
+        g.dire,
+      ]
+    ) {
+      teams.set(
+        team,
+        (
+          teams.get(team) ||
+          0
+        ) + 1,
+      );
+    }
+  }
+
+  const sorted = [
+    ...teams.entries(),
+  ].sort(
+    (a, b) =>
+      a[0].localeCompare(
+        b[0],
+      ),
+  );
+
+  const lines = [
+    "🔎 <b>Команды в сохранённых картах</b>",
+    `Всего уникальных: <b>${sorted.length}</b>`,
+  ];
+
+  for (
+    const [team, maps]
+    of sorted
+  ) {
+    lines.push(
+      `• <b>${escapeHtml(team)}</b> — карт: ${maps}`,
+    );
+  }
+
+  return lines.join(
+    "\n",
+  );
+}
+
 function telegramKeyboard() {
   return {
     keyboard: [
@@ -1233,7 +1255,7 @@ async function stratzQuery(
             `Bearer ${env.STRATZ_TOKEN}`,
 
           "user-agent":
-            "TI2026PredictionBot/5.0",
+            "TI2026PredictionBot/6.0",
         },
 
         body:
@@ -1443,15 +1465,18 @@ async function fetchTeamBatchHistory(
   env,
   teamIds,
 ) {
-  const matchesByTeam = new Map();
+  const matchesByTeam =
+    new Map();
 
   for (
     let page = 0;
-    page < MAX_MATCH_PAGES;
+    page <
+    MAX_MATCH_PAGES;
     page += 1
   ) {
     const skip =
-      page * TEAM_MATCH_TAKE;
+      page *
+      TEAM_MATCH_TAKE;
 
     const teams =
       await fetchTeamsMatches(
@@ -1460,22 +1485,36 @@ async function fetchTeamBatchHistory(
         skip,
       );
 
-    if (!teams.length) {
+    if (
+      !teams.length
+    ) {
       break;
     }
 
-    let anyFullPage = false;
+    let anyFullPage =
+      false;
 
-    for (const team of teams) {
+    for (
+      const team
+      of teams
+    ) {
       const teamId =
-        Number(team.id);
+        Number(
+          team.id,
+        );
 
       const matches =
-        Array.isArray(team.matches)
+        Array.isArray(
+          team.matches,
+        )
           ? team.matches
           : [];
 
-      if (!matchesByTeam.has(teamId)) {
+      if (
+        !matchesByTeam.has(
+          teamId,
+        )
+      ) {
         matchesByTeam.set(
           teamId,
           [],
@@ -1484,51 +1523,76 @@ async function fetchTeamBatchHistory(
 
       matchesByTeam
         .get(teamId)
-        .push(...matches);
+        .push(
+          ...matches,
+        );
 
       if (
         matches.length ===
         TEAM_MATCH_TAKE
       ) {
-        anyFullPage = true;
+        anyFullPage =
+          true;
       }
     }
 
-    if (!anyFullPage) {
+    if (
+      !anyFullPage
+    ) {
       break;
     }
 
-    /*
-     * Не долбим STRATZ запросами подряд.
-     */
     await sleep(350);
   }
 
   return [
-    ...matchesByTeam.entries(),
+    ...matchesByTeam
+      .entries(),
   ].map(
-    ([id, matches]) => ({
+    ([
+      id,
+      matches,
+    ]) => ({
       id,
       matches,
     }),
   );
 }
 
-async function fetchCurrentTIGames(env, knownIds) {
+async function fetchCurrentTIGames(
+  env,
+  knownIds,
+) {
   const known = new Set(
-    [...SEED_TEAM_IDS, ...(knownIds || [])]
+    [
+      ...SEED_TEAM_IDS,
+      ...(knownIds || []),
+    ]
       .map(Number)
-      .filter((id) => Number.isFinite(id) && id > 0),
+      .filter(
+        (id) =>
+          Number.isFinite(id) &&
+          id > 0,
+      ),
   );
 
-  const processed = new Set();
-  const byId = new Map();
+  const processed =
+    new Set();
 
-  let frontier = [...known];
+  const byId =
+    new Map();
+
+  let frontier = [
+    ...known,
+  ];
 
   for (
     let round = 0;
-    round < MAX_DISCOVERY_ROUNDS && frontier.length;
+
+    round <
+      MAX_DISCOVERY_ROUNDS &&
+    frontier.length;
+
     round += 1
   ) {
     const currentRound = [
@@ -1548,54 +1612,104 @@ async function fetchCurrentTIGames(env, knownIds) {
 
     for (
       let offset = 0;
-      offset < currentRound.length;
-      offset += TEAM_BATCH_SIZE
+
+      offset <
+      currentRound.length;
+
+      offset +=
+        TEAM_BATCH_SIZE
     ) {
-      const batch = currentRound.slice(
-        offset,
-        offset + TEAM_BATCH_SIZE,
-      );
+      const batch =
+        currentRound.slice(
+          offset,
+          offset +
+            TEAM_BATCH_SIZE,
+        );
 
-      if (!batch.length) continue;
+      if (
+        !batch.length
+      ) {
+        continue;
+      }
 
-      for (const id of batch) {
+      for (
+        const id
+        of batch
+      ) {
         processed.add(id);
       }
 
-      const teams = await fetchTeamBatchHistory(
-        env,
-        batch,
-      );
+      const teams =
+        await fetchTeamBatchHistory(
+          env,
+          batch,
+        );
 
-      for (const team of teams) {
-        for (const raw of team.matches || []) {
-          if (Number(raw.leagueId) !== LEAGUE_ID) {
+      for (
+        const team
+        of teams
+      ) {
+        for (
+          const raw
+          of team.matches ||
+          []
+        ) {
+          if (
+            Number(
+              raw.leagueId,
+            ) !==
+            LEAGUE_ID
+          ) {
             continue;
           }
 
-          const game = parseStratzMatch(raw);
+          const game =
+            parseStratzMatch(
+              raw,
+            );
 
-          if (game) {
-            byId.set(Number(game.matchId), game);
+          if (
+            game
+          ) {
+            byId.set(
+              Number(
+                game.matchId,
+              ),
+              game,
+            );
           }
 
-          const radiantId = Number(
-            raw.radiantTeamId ||
-              raw.radiantTeam?.id ||
-              0,
-          );
+          const radiantId =
+            Number(
+              raw.radiantTeamId ||
+                raw.radiantTeam
+                  ?.id ||
+                0,
+            );
 
-          const direId = Number(
-            raw.direTeamId ||
-              raw.direTeam?.id ||
-              0,
-          );
+          const direId =
+            Number(
+              raw.direTeamId ||
+                raw.direTeam
+                  ?.id ||
+                0,
+            );
 
-          for (const id of [radiantId, direId]) {
+          for (
+            const id
+            of [
+              radiantId,
+              direId,
+            ]
+          ) {
             if (
-              Number.isFinite(id) &&
+              Number.isFinite(
+                id,
+              ) &&
               id > 0 &&
-              !known.has(id)
+              !known.has(
+                id,
+              )
             ) {
               known.add(id);
               frontier.push(id);
@@ -1608,20 +1722,29 @@ async function fetchCurrentTIGames(env, knownIds) {
     frontier = [
       ...new Set(
         frontier.filter(
-          (id) => !processed.has(Number(id)),
+          (id) =>
+            !processed.has(
+              Number(id),
+            ),
         ),
       ),
     ];
   }
 
   return {
-    games: [...byId.values()].sort(
+    games: [
+      ...byId.values(),
+    ].sort(
       (a, b) =>
-        a.startTime - b.startTime ||
-        a.matchId - b.matchId,
+        a.startTime -
+          b.startTime ||
+        a.matchId -
+          b.matchId,
     ),
 
-    teamIds: [...known],
+    teamIds: [
+      ...known,
+    ],
   };
 }
 
@@ -1731,20 +1854,20 @@ export class BotState
   ) {
     const existing =
       await this.getGames();
-  
+
     const knownTeamIds =
       (
         await this.ctx.storage.get(
           "knownTeamIds",
         )
       ) || SEED_TEAM_IDS;
-  
+
     const incoming =
       await fetchCurrentTIGames(
         this.env,
         knownTeamIds,
       );
-  
+
     const byId =
       new Map(
         existing.map(
@@ -1849,7 +1972,6 @@ export class BotState
       newGames:
         Math.max(
           0,
-
           games.length -
             existing.length,
         ),
@@ -1917,10 +2039,24 @@ export class BotState
   async handleTelegram(
     update,
   ) {
+    /*
+     * Telegram может повторно
+     * прислать один и тот же update,
+     * если Worker долго отвечает.
+     *
+     * Запоминаем update_id ДО
+     * обращения к STRATZ.
+     */
     const updateId =
-      Number(update?.update_id);
-  
-    if (Number.isFinite(updateId)) {
+      Number(
+        update?.update_id,
+      );
+
+    if (
+      Number.isFinite(
+        updateId,
+      )
+    ) {
       const lastUpdateId =
         Number(
           (
@@ -1929,24 +2065,25 @@ export class BotState
             )
           ) ?? -1,
         );
-  
-      if (updateId <= lastUpdateId) {
+
+      if (
+        updateId <=
+        lastUpdateId
+      ) {
         return {
           ok: true,
           duplicate: true,
         };
       }
-  
+
       await this.ctx.storage.put(
         "lastTelegramUpdateId",
         updateId,
       );
     }
-  
+
     const message =
       update?.message;
-  
-    // дальше твой существующий код...
 
     if (
       !message?.chat
@@ -2057,10 +2194,12 @@ export class BotState
       text ===
         "📊 Статус"
     ) {
-      await this.safeSync(
-        false,
-      );
-
+      /*
+       * На /status не заставляем
+       * пользователя ждать STRATZ.
+       * Показываем уже сохранённое
+       * состояние.
+       */
       const games =
         await this.getGames();
 
@@ -2080,7 +2219,7 @@ export class BotState
 
           chatId,
 
-          `⚠️ Не удалось получить матчи TI 2026:\n<code>${escapeHtml(error)}</code>`,
+          `⚠️ Пока нет сохранённых матчей TI 2026.\nПоследняя ошибка:\n<code>${escapeHtml(error)}</code>`,
 
           telegramKeyboard(),
         );
@@ -2109,16 +2248,39 @@ export class BotState
       text ===
         "🎮 Последние матчи"
     ) {
-      await this.safeSync(
-        false,
-      );
-
       await sendTelegram(
         this.env,
 
         chatId,
 
         recentGamesText(
+          await this.getGames(),
+        ),
+
+        telegramKeyboard(),
+      );
+
+      return {
+        ok: true,
+      };
+    }
+
+    /*
+     * DEBUG:
+     * показывает реальные canonical
+     * названия всех команд,
+     * присутствующих в сохранённых
+     * картах.
+     */
+    if (
+      text === "/teams"
+    ) {
+      await sendTelegram(
+        this.env,
+
+        chatId,
+
+        teamsDebugText(
           await this.getGames(),
         ),
 
@@ -2193,7 +2355,12 @@ export class BotState
 
       chatId,
 
-      "Используй кнопки снизу или команды:\n/status\n/predictions\n/matches\n/check",
+      "Используй кнопки снизу или команды:\n" +
+        "/status\n" +
+        "/predictions\n" +
+        "/matches\n" +
+        "/check\n" +
+        "/teams",
 
       telegramKeyboard(),
     );
@@ -2244,6 +2411,13 @@ export class BotState
       const games =
         await this.getGames();
 
+      const {
+        series,
+      } =
+        calculateStates(
+          games,
+        );
+
       return jsonResponse({
         ok:
           true,
@@ -2256,6 +2430,9 @@ export class BotState
 
         games:
           games.length,
+
+        series:
+          series.length,
 
         knownTeams:
           (
