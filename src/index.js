@@ -600,7 +600,7 @@ async function fetchCurrentTIGames(env, knownIds) {
   ) {
     const batch = frontier
       .filter((id) => !processed.has(id))
-      .slice(0, 32);
+      .slice(0, 5);
 
     if (!batch.length) break;
 
