@@ -1,0 +1,2 @@
+Cloudflare Worker version 3.0
+Use src/index.js + wrangler.jsonc.
