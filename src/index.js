@@ -1536,23 +1536,16 @@ async function fetchCurrentTIGames(env, knownIds) {
     round < MAX_DISCOVERY_ROUNDS && frontier.length;
     round += 1
   ) {
-    /*
-     * ВАЖНО:
-     * теперь за один discovery round мы проходим
-     * ВСЕ найденные команды, просто пачками по 5.
-     *
-     * Раньше бралась только одна пачка из 5 команд,
-     * поэтому часть участников могла вообще
-     * не дойти до STRATZ.
-     */
     const currentRound = [
       ...new Set(
-        frontier.filter(
-          (id) =>
-            Number.isFinite(Number(id)) &&
-            Number(id) > 0 &&
-            !processed.has(Number(id)),
-        ),
+        frontier
+          .map(Number)
+          .filter(
+            (id) =>
+              Number.isFinite(id) &&
+              id > 0 &&
+              !processed.has(id),
+          ),
       ),
     ];
 
@@ -1573,7 +1566,7 @@ async function fetchCurrentTIGames(env, knownIds) {
       }
 
       for (const id of batch) {
-        processed.add(Number(id));
+        processed.add(id);
       }
 
       const teams = await fetchTeamBatchHistory(
@@ -1583,23 +1576,6 @@ async function fetchCurrentTIGames(env, knownIds) {
 
       for (const team of teams) {
         for (const raw of team.matches || []) {
-          const radiantId = Number(
-            raw.radiantTeamId ||
-              raw.radiantTeam?.id ||
-              0,
-          );
-
-          const direId = Number(
-            raw.direTeamId ||
-              raw.direTeam?.id ||
-              0,
-          );
-
-          /*
-           * Сохраняем только матчи TI 2026,
-           * но соперников обнаруживаем именно
-           * из матчей нужной лиги.
-           */
           if (Number(raw.leagueId) !== LEAGUE_ID) {
             continue;
           }
@@ -1613,21 +1589,27 @@ async function fetchCurrentTIGames(env, knownIds) {
             );
           }
 
-          for (const id of [
-            radiantId,
-            direId,
-          ]) {
+          const opponentIds = [
+            Number(
+              raw.radiantTeamId ||
+                raw.radiantTeam?.id ||
+                0,
+            ),
+
+            Number(
+              raw.direTeamId ||
+                raw.direTeam?.id ||
+                0,
+            ),
+          ];
+
+          for (const id of opponentIds) {
             if (
               Number.isFinite(id) &&
               id > 0 &&
               !known.has(id)
             ) {
               known.add(id);
-
-              /*
-               * Эту новую команду обработаем
-               * в следующем discovery round.
-               */
               frontier.push(id);
             }
           }
