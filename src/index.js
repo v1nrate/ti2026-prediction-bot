@@ -371,18 +371,20 @@ function buildSeries(games) {
     preliminary.push({
       key:
         `series:${seriesId}`,
-
+    
       seriesId,
-
+    
       startTime:
-        0,
-
+        Number(
+          s.lastMatchDateTime || 0,
+        ),
+    
       teamA,
       teamB,
-
+    
       scoreA,
       scoreB,
-
+    
       winner,
       loser,
     });
@@ -1023,10 +1025,7 @@ function changesText(
   );
 }
 
-function recentGamesText(
-  games,
-  limit = 20,
-) {
+function recentGamesText(games) {
   const series =
     buildSeries(games);
 
@@ -1037,115 +1036,147 @@ function recentGamesText(
   }
 
   /*
-   * Последние серии сверху.
-   *
-   * Сейчас buildSeries сортирует по seriesId
-   * по возрастанию, поэтому здесь просто
-   * разворачиваем.
+   * Новые серии сверху.
    */
   const sorted =
-    [...series]
-      .sort(
-        (a, b) =>
-          b.seriesId -
+    [...series].sort(
+      (a, b) =>
+        b.startTime -
+          a.startTime ||
+        b.seriesId -
           a.seriesId,
-      )
-      .slice(
-        0,
-        limit,
+    );
+
+  /*
+   * Группируем по календарному дню.
+   *
+   * Europe/Riga — твой текущий часовой пояс.
+   */
+  const groups =
+    new Map();
+
+  for (const s of sorted) {
+    const date =
+      new Date(
+        s.startTime * 1000,
       );
+
+    const dateKey =
+      new Intl.DateTimeFormat(
+        "ru-RU",
+        {
+          timeZone:
+            "Europe/Riga",
+
+          year:
+            "numeric",
+
+          month:
+            "2-digit",
+
+          day:
+            "2-digit",
+        },
+      ).format(date);
+
+    const dateTitle =
+      new Intl.DateTimeFormat(
+        "ru-RU",
+        {
+          timeZone:
+            "Europe/Riga",
+
+          day:
+            "numeric",
+
+          month:
+            "long",
+        },
+      ).format(date);
+
+    if (
+      !groups.has(dateKey)
+    ) {
+      groups.set(
+        dateKey,
+        {
+          title:
+            dateTitle,
+
+          series:
+            [],
+        },
+      );
+    }
+
+    groups
+      .get(dateKey)
+      .series
+      .push(s);
+  }
 
   const lines = [
     "🎮 <b>TI 2026 — сыгранные серии</b>",
     "",
   ];
 
-  let index = 1;
-
-  for (const s of sorted) {
-    const winner = s.winner;
-    const loser = s.loser;
-  
-    let winnerScore;
-    let loserScore;
-  
-    if (winner === s.teamA) {
-      winnerScore = s.scoreA;
-      loserScore = s.scoreB;
-    } else {
-      winnerScore = s.scoreB;
-      loserScore = s.scoreA;
-    }
-  
+  for (
+    const group
+    of groups.values()
+  ) {
     lines.push(
-      `${index}. ✅ <b>${escapeHtml(winner)}</b> ` +
-      `<b>${winnerScore}:${loserScore}</b> ` +
-      `${escapeHtml(loser)}`
+      `📅 <b>${escapeHtml(group.title)}</b>`,
     );
-  
-    index += 1;
+
+    lines.push("");
+
+    let number = 1;
+
+    for (
+      const s
+      of group.series
+    ) {
+      const winner =
+        s.winner;
+
+      const loser =
+        s.loser;
+
+      let winnerScore;
+      let loserScore;
+
+      if (
+        winner === s.teamA
+      ) {
+        winnerScore =
+          s.scoreA;
+
+        loserScore =
+          s.scoreB;
+      } else {
+        winnerScore =
+          s.scoreB;
+
+        loserScore =
+          s.scoreA;
+      }
+
+      lines.push(
+        `${number}. ✅ ` +
+        `<b>${escapeHtml(winner)}</b> ` +
+        `<b>${winnerScore}:${loserScore}</b> ` +
+        `${escapeHtml(loser)}`,
+      );
+
+      number += 1;
+    }
+
+    lines.push("");
   }
 
   lines.push(
     `Завершено серий: <b>${series.length}</b>`,
   );
-
-  if (
-    series.length >
-    sorted.length
-  ) {
-    lines.push(
-      `Показано последних: <b>${sorted.length}</b>`,
-    );
-  }
-
-  return lines.join(
-    "\n",
-  );
-}
-function teamsDebugText(games) {
-  const teams = new Map();
-
-  for (const g of games) {
-    for (
-      const team
-      of [
-        g.radiant,
-        g.dire,
-      ]
-    ) {
-      teams.set(
-        team,
-        (
-          teams.get(team) ||
-          0
-        ) + 1,
-      );
-    }
-  }
-
-  const sorted = [
-    ...teams.entries(),
-  ].sort(
-    (a, b) =>
-      a[0].localeCompare(
-        b[0],
-      ),
-  );
-
-  const lines = [
-    "🔎 <b>Команды в сохранённых картах</b>",
-    `Всего уникальных: <b>${sorted.length}</b>`,
-  ];
-
-  for (
-    const [team, maps]
-    of sorted
-  ) {
-    lines.push(
-      `• <b>${escapeHtml(team)}</b> — карт: ${maps}`,
-    );
-  }
 
   return lines.join(
     "\n",
@@ -1473,6 +1504,11 @@ function parseStratzMatch(
 
     radiantWin,
 
+    lastMatchDateTime:
+    Number(
+      raw.series.lastMatchDateTime || 0,
+    ),
+
     winner:
       radiantWin
         ? radiant
@@ -1549,18 +1585,19 @@ async function fetchTeamsMatches(
           id
           type
           leagueId
-
+        
           teamOneId
           teamTwoId
           teamOneWinCount
           teamTwoWinCount
           winningTeamId
-
+          lastMatchDateTime
+        
           teamOne {
             id
             name
           }
-
+        
           teamTwo {
             id
             name
