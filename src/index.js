@@ -1035,9 +1035,6 @@ function recentGamesText(games) {
     );
   }
 
-  /*
-   * Новые серии сверху.
-   */
   const sorted =
     [...series].sort(
       (a, b) =>
@@ -1047,13 +1044,59 @@ function recentGamesText(games) {
           a.seriesId,
     );
 
-  /*
-   * Группируем по календарному дню.
-   *
-   * Europe/Riga — твой текущий часовой пояс.
-   */
   const groups =
     new Map();
+
+  const dateFormatter =
+    new Intl.DateTimeFormat(
+      "ru-RU",
+      {
+        timeZone:
+          "Europe/Riga",
+
+        day:
+          "numeric",
+
+        month:
+          "long",
+      },
+    );
+
+  const dateKeyFormatter =
+    new Intl.DateTimeFormat(
+      "ru-RU",
+      {
+        timeZone:
+          "Europe/Riga",
+
+        year:
+          "numeric",
+
+        month:
+          "2-digit",
+
+        day:
+          "2-digit",
+      },
+    );
+
+  const timeFormatter =
+    new Intl.DateTimeFormat(
+      "ru-RU",
+      {
+        timeZone:
+          "Europe/Riga",
+
+        hour:
+          "2-digit",
+
+        minute:
+          "2-digit",
+
+        hour12:
+          false,
+      },
+    );
 
   for (const s of sorted) {
     const date =
@@ -1062,37 +1105,14 @@ function recentGamesText(games) {
       );
 
     const dateKey =
-      new Intl.DateTimeFormat(
-        "ru-RU",
-        {
-          timeZone:
-            "Europe/Riga",
-
-          year:
-            "numeric",
-
-          month:
-            "2-digit",
-
-          day:
-            "2-digit",
-        },
-      ).format(date);
+      dateKeyFormatter.format(
+        date,
+      );
 
     const dateTitle =
-      new Intl.DateTimeFormat(
-        "ru-RU",
-        {
-          timeZone:
-            "Europe/Riga",
-
-          day:
-            "numeric",
-
-          month:
-            "long",
-        },
-      ).format(date);
+      dateFormatter.format(
+        date,
+      );
 
     if (
       !groups.has(dateKey)
@@ -1103,7 +1123,7 @@ function recentGamesText(games) {
           title:
             dateTitle,
 
-          series:
+          items:
             [],
         },
       );
@@ -1111,7 +1131,7 @@ function recentGamesText(games) {
 
     groups
       .get(dateKey)
-      .series
+      .items
       .push(s);
   }
 
@@ -1130,11 +1150,9 @@ function recentGamesText(games) {
 
     lines.push("");
 
-    let number = 1;
-
     for (
       const s
-      of group.series
+      of group.items
     ) {
       const winner =
         s.winner;
@@ -1161,14 +1179,20 @@ function recentGamesText(games) {
           s.scoreA;
       }
 
+      const time =
+        timeFormatter.format(
+          new Date(
+            s.startTime *
+              1000,
+          ),
+        );
+
       lines.push(
-        `${number}. ✅ ` +
+        `🕐 <b>${time}</b> · ✅ ` +
         `<b>${escapeHtml(winner)}</b> ` +
         `<b>${winnerScore}:${loserScore}</b> ` +
         `${escapeHtml(loser)}`,
       );
-
-      number += 1;
     }
 
     lines.push("");
@@ -1471,6 +1495,11 @@ function parseStratzMatch(
                     raw.series.winningTeamId,
                   )
                 : null,
+                    
+            lastMatchDateTime:
+              Number(
+                raw.series.lastMatchDateTime || 0,
+              ),
           }
         : null,
 
@@ -1503,11 +1532,6 @@ function parseStratzMatch(
       ),
 
     radiantWin,
-
-    lastMatchDateTime:
-    Number(
-      raw.series.lastMatchDateTime || 0,
-    ),
 
     winner:
       radiantWin
