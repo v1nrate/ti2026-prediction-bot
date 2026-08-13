@@ -1732,10 +1732,9 @@ export class BotState
       SEED_TEAM_IDS;
 
     const incoming =
-      await fetchCurrentTIGames(
-        this.env,
-        knownTeamIds,
-      );
+  await fetchCurrentTIGames(
+    this.env,
+  );
 
     const byId =
       new Map(
