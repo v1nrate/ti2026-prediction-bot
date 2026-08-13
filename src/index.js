@@ -2594,18 +2594,6 @@ export class BotState
       await this.getOwnerId();
 
     if (
-      !ownerId ||
-      Number(
-        ownerId,
-      ) !==
-        userId
-    ) {
-      return {
-        ok: true,
-      };
-    }
-
-    if (
       text ===
         "/predictions" ||
       text ===
