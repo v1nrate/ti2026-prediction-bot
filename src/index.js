@@ -954,6 +954,119 @@ function predictionsText() {
   );
 }
 
+function predictionIcon(
+  status,
+  state,
+) {
+  if (status === "won") {
+    return "✅";
+  }
+
+  if (status === "lost") {
+    return "🔴";
+  }
+
+  if (status === "waiting") {
+    return "🟡";
+  }
+
+  /*
+   * Команда ещё вообще
+   * не сыграла ни одной серии.
+   */
+  if (
+    state.swissWins === 0 &&
+    state.swissLosses === 0 &&
+    state.eliminationResult === null
+  ) {
+    return "⚪";
+  }
+
+  return "🟢";
+}
+
+function compactPredictionHint(
+  kind,
+  state,
+  status,
+) {
+  const w =
+    state.swissWins;
+
+  const l =
+    state.swissLosses;
+
+  /*
+   * Если прогноз уже окончательно
+   * рассчитан — говорим об этом.
+   */
+  if (status === "won") {
+    return "прогноз сыграл";
+  }
+
+  if (status === "lost") {
+    return "прогноз уже не сыграет";
+  }
+
+  if (status === "waiting") {
+    if (
+      kind === "elim_win"
+    ) {
+      return "нужно выиграть раунд на выбывание";
+    }
+
+    if (
+      kind === "elim_loss"
+    ) {
+      return "нужно проиграть раунд на выбывание";
+    }
+
+    return "решающий этап";
+  }
+
+  /*
+   * Точные результаты.
+   */
+  if (kind === "4-0") {
+    const remaining =
+      Math.max(
+        0,
+        4 - w,
+      );
+
+    return remaining === 1
+      ? "осталась 1 победа"
+      : `осталось побед: ${remaining}`;
+  }
+
+  if (kind === "4-1") {
+    return "цель: закончить 4-1";
+  }
+
+  if (kind === "1-4") {
+    return "цель: закончить 1-4";
+  }
+
+  if (kind === "0-4") {
+    const remaining =
+      Math.max(
+        0,
+        4 - l,
+      );
+
+    return remaining === 1
+      ? "осталось 1 поражение"
+      : `осталось поражений: ${remaining}`;
+  }
+
+  /*
+   * Для elimination-прогнозов
+   * до решающего этапа дополнительная
+   * строка не нужна.
+   */
+  return null;
+}
+
 function statusText(
   games,
 ) {
@@ -965,56 +1078,267 @@ function statusText(
       games,
     );
 
-  const lines = [
-    "🏆 <b>TI 2026 — состояние прогнозов</b>",
-
-    `Источник: <b>STRATZ</b> · карт: <b>${games.length}</b> · завершено серий: <b>${series.length}</b>`,
-  ];
-
-  for (
-    const kind
-    of ORDER
-  ) {
-    lines.push(
-      `\n<b>${KIND_LABEL[kind]}</b>`,
-    );
-
-    for (
-      const p
-      of PREDICTIONS
-    ) {
-      if (
-        p.kind !== kind
-      ) {
-        continue;
-      }
-
-      const st =
-        states.get(
-          p.team,
-        ) ||
-        emptyTeamState(
-          p.team,
-        );
+  const getData =
+    (team, kind) => {
+      const state =
+        states.get(team) ||
+        emptyTeamState(team);
 
       const [
         status,
-        reason,
       ] =
         predictionStatus(
           kind,
-          st,
+          state,
         );
 
-      lines.push(
-        `${STATUS_ICON[status]} <b>${escapeHtml(p.team)}</b> — ${st.swissWins}-${st.swissLosses}`,
+      return {
+        state,
+        status,
+
+        icon:
+          predictionIcon(
+            status,
+            state,
+          ),
+
+        hint:
+          compactPredictionHint(
+            kind,
+            state,
+            status,
+          ),
+      };
+    };
+
+  const lines = [
+    "🏆 <b>TI 2026 — МОИ ПРОГНОЗЫ</b>",
+    "━━━━━━━━━━━━━━━━━━",
+    "",
+  ];
+
+  /*
+   * 4-0
+   */
+  lines.push(
+    "🎯 <b>ТОЧНЫЙ СЧЁТ</b>",
+    "",
+    "<b>4–0</b>",
+  );
+
+  for (
+    const p
+    of PREDICTIONS.filter(
+      (x) =>
+        x.kind === "4-0",
+    )
+  ) {
+    const d =
+      getData(
+        p.team,
+        p.kind,
       );
 
+    lines.push(
+      `${d.icon} <b>${escapeHtml(p.team)}</b> — <b>${d.state.swissWins}–${d.state.swissLosses}</b>`,
+    );
+
+    if (d.hint) {
       lines.push(
-        `   ${escapeHtml(reason)}`,
+        `   ↳ ${escapeHtml(d.hint)}`,
       );
     }
   }
+
+  /*
+   * 4-1
+   */
+  lines.push(
+    "",
+    "<b>4–1</b>",
+  );
+
+  for (
+    const p
+    of PREDICTIONS.filter(
+      (x) =>
+        x.kind === "4-1",
+    )
+  ) {
+    const d =
+      getData(
+        p.team,
+        p.kind,
+      );
+
+    lines.push(
+      `${d.icon} <b>${escapeHtml(p.team)}</b> — <b>${d.state.swissWins}–${d.state.swissLosses}</b>`,
+    );
+
+    if (d.hint) {
+      lines.push(
+        `   ↳ ${escapeHtml(d.hint)}`,
+      );
+    }
+  }
+
+  /*
+   * Проходят elimination.
+   */
+  lines.push(
+    "",
+    "🔥 <b>ПРОХОДЯТ РАУНД НА ВЫБЫВАНИЕ</b>",
+    "",
+  );
+
+  for (
+    const p
+    of PREDICTIONS.filter(
+      (x) =>
+        x.kind ===
+        "elim_win",
+    )
+  ) {
+    const d =
+      getData(
+        p.team,
+        p.kind,
+      );
+
+    lines.push(
+      `${d.icon} <b>${escapeHtml(p.team)}</b> — <b>${d.state.swissWins}–${d.state.swissLosses}</b>`,
+    );
+
+    /*
+     * Здесь подсказку показываем
+     * только когда уже наступил
+     * решающий этап или прогноз
+     * рассчитан.
+     */
+    if (
+      d.status !== "alive" &&
+      d.hint
+    ) {
+      lines.push(
+        `   ↳ ${escapeHtml(d.hint)}`,
+      );
+    }
+  }
+
+  /*
+   * Вылетают elimination.
+   */
+  lines.push(
+    "",
+    "💀 <b>ВЫЛЕТАЮТ В РАУНДЕ НА ВЫБЫВАНИЕ</b>",
+    "",
+  );
+
+  for (
+    const p
+    of PREDICTIONS.filter(
+      (x) =>
+        x.kind ===
+        "elim_loss",
+    )
+  ) {
+    const d =
+      getData(
+        p.team,
+        p.kind,
+      );
+
+    lines.push(
+      `${d.icon} <b>${escapeHtml(p.team)}</b> — <b>${d.state.swissWins}–${d.state.swissLosses}</b>`,
+    );
+
+    if (
+      d.status !== "alive" &&
+      d.hint
+    ) {
+      lines.push(
+        `   ↳ ${escapeHtml(d.hint)}`,
+      );
+    }
+  }
+
+  /*
+   * 1-4
+   */
+  lines.push(
+    "",
+    "🎯 <b>ТОЧНЫЙ СЧЁТ</b>",
+    "",
+    "<b>1–4</b>",
+  );
+
+  for (
+    const p
+    of PREDICTIONS.filter(
+      (x) =>
+        x.kind === "1-4",
+    )
+  ) {
+    const d =
+      getData(
+        p.team,
+        p.kind,
+      );
+
+    lines.push(
+      `${d.icon} <b>${escapeHtml(p.team)}</b> — <b>${d.state.swissWins}–${d.state.swissLosses}</b>`,
+    );
+
+    if (d.hint) {
+      lines.push(
+        `   ↳ ${escapeHtml(d.hint)}`,
+      );
+    }
+  }
+
+  /*
+   * 0-4
+   */
+  lines.push(
+    "",
+    "<b>0–4</b>",
+  );
+
+  for (
+    const p
+    of PREDICTIONS.filter(
+      (x) =>
+        x.kind === "0-4",
+    )
+  ) {
+    const d =
+      getData(
+        p.team,
+        p.kind,
+      );
+
+    lines.push(
+      `${d.icon} <b>${escapeHtml(p.team)}</b> — <b>${d.state.swissWins}–${d.state.swissLosses}</b>`,
+    );
+
+    if (d.hint) {
+      lines.push(
+        `   ↳ ${escapeHtml(d.hint)}`,
+      );
+    }
+  }
+
+  /*
+   * Легенда.
+   */
+  lines.push(
+    "",
+    "━━━━━━━━━━━━━━━━━━",
+    "⚪ ещё не играли  ·  🟢 прогноз жив",
+    "🟡 решающий этап  ·  🔴 проигран  ·  ✅ сыграл",
+    "",
+    `📊 Завершено серий: <b>${series.length}</b>`,
+  );
 
   return lines.join(
     "\n",
