@@ -4706,23 +4706,7 @@ export class BotState
           error,
         );
       }
-
-
-      let liveGames = [];
-      
-      try {
-        liveGames =
-          await fetchValveLiveGames(
-            this.env,
-          );
-      } catch (error) {
-        console.error(
-          "Valve status overlay after check failed:",
-          error,
-        );
-      }
-
-      await sendTelegram(
+await sendTelegram(
         this.env,
 
         chatId,
