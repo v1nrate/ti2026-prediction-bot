@@ -4358,47 +4358,50 @@ export class BotState
       text ===
         "📊 Статус"
     ) {
+      const games =
+        await this.getGames();
+
+      let liveGames = [];
+
       try {
-        const [
-          valveMatches,
-          liveGames,
-        ] =
-          await Promise.all([
-            fetchValveMatchHistory(
-              this.env,
-            ),
-            fetchValveLiveGames(
-              this.env,
-            ),
-          ]);
-
-        const valveSeries =
-          buildValveSeries(
-            valveMatches,
+        liveGames =
+          await fetchValveLiveGames(
+            this.env,
           );
-
-        await sendTelegram(
-          this.env,
-          chatId,
-          statusTextFromValve(
-            valveSeries,
-            liveGames,
-          ),
-          telegramKeyboard(),
-        );
       } catch (error) {
         console.error(
-          "Valve status error:",
+          "Valve status overlay failed:",
           error,
         );
+      }
+
+      if (
+        !games.length
+      ) {
+        const error =
+          (
+            await this.ctx.storage.get(
+              "lastError",
+            )
+          ) ||
+          "матчи пока не получены";
 
         await sendTelegram(
           this.env,
           chatId,
-          "⚠️ <b>Не удалось получить статус Valve.</b>\n\n" +
-            `<code>${escapeHtml(
-              String(error),
-            )}</code>`,
+          `⚠️ Пока нет сохранённых матчей TI 2026.\nПоследняя ошибка:\n<code>${escapeHtml(
+            error,
+          )}</code>`,
+          telegramKeyboard(),
+        );
+      } else {
+        await sendTelegram(
+          this.env,
+          chatId,
+          statusText(
+            games,
+            liveGames,
+          ),
           telegramKeyboard(),
         );
       }
@@ -4416,41 +4419,14 @@ export class BotState
       text ===
         "🎮 Последние матчи"
     ) {
-      try {
-        const valveMatches =
-          await fetchValveMatchHistory(
-            this.env,
-          );
-
-        const valveSeries =
-          buildValveSeries(
-            valveMatches,
-          );
-
-        await sendTelegram(
-          this.env,
-          chatId,
-          recentValveSeriesText(
-            valveSeries,
-          ),
-          telegramKeyboard(),
-        );
-      } catch (error) {
-        console.error(
-          "Valve history error:",
-          error,
-        );
-
-        await sendTelegram(
-          this.env,
-          chatId,
-          "⚠️ <b>Не удалось получить историю Valve.</b>\n\n" +
-            `<code>${escapeHtml(
-              String(error),
-            )}</code>`,
-          telegramKeyboard(),
-        );
-      }
+      await sendTelegram(
+        this.env,
+        chatId,
+        recentGamesText(
+          await this.getGames(),
+        ),
+        telegramKeyboard(),
+      );
 
       return {
         ok: true,
@@ -4654,8 +4630,8 @@ export class BotState
 
             chatId,
 
-            statusTextFromValve(
-              valveSeries,
+            statusText(
+              games,
               liveGames,
             ),
 
@@ -4682,7 +4658,7 @@ export class BotState
 
         chatId,
 
-        "🔄 Проверяю TI 2026 через Valve + STRATZ…",
+        "🔄 Проверяю TI 2026 через STRATZ + Valve LIVE…",
 
         telegramKeyboard(),
       );
@@ -4731,6 +4707,21 @@ export class BotState
         );
       }
 
+
+      let liveGames = [];
+      
+      try {
+        liveGames =
+          await fetchValveLiveGames(
+            this.env,
+          );
+      } catch (error) {
+        console.error(
+          "Valve status overlay after check failed:",
+          error,
+        );
+      }
+
       await sendTelegram(
         this.env,
 
@@ -4760,8 +4751,8 @@ export class BotState
 
           chatId,
 
-            statusTextFromValve(
-              valveSeries,
+            statusText(
+              games,
               liveGames,
             ),
 
