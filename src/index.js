@@ -4,6 +4,9 @@ const LEAGUE_ID = 19719;
 const VALVE_LIVE_URL =
   "https://api.steampowered.com/IDOTA2Match_570/GetLiveLeagueGames/v1/";
 
+const VALVE_MATCH_HISTORY_URL =
+  "https://api.steampowered.com/IDOTA2Match_570/GetMatchHistory/v1/";
+
 const VALVE_HEROES_URL =
   "https://api.steampowered.com/IEconDOTA2_570/GetHeroes/v1/";
 
@@ -2158,6 +2161,459 @@ function recentGamesText(
   );
 }
 
+
+async function fetchValveMatchHistory(env) {
+  if (!env.STEAM_API_KEY) {
+    throw new Error("STEAM_API_KEY secret is missing");
+  }
+
+  const allMatches = [];
+  const seen = new Set();
+  let startAtMatchId = null;
+
+  for (let page = 0; page < 10; page += 1) {
+    const url = new URL(VALVE_MATCH_HISTORY_URL);
+    url.searchParams.set("key", env.STEAM_API_KEY);
+    url.searchParams.set("league_id", String(LEAGUE_ID));
+    url.searchParams.set("matches_requested", "100");
+
+    if (startAtMatchId) {
+      url.searchParams.set("start_at_match_id", String(startAtMatchId));
+    }
+
+    const response = await fetch(url.toString(), {
+      headers: { accept: "application/json" },
+    });
+
+    const raw = await response.text();
+
+    if (!response.ok) {
+      throw new Error(
+        `Valve history HTTP ${response.status}: ${raw.slice(0, 300)}`,
+      );
+    }
+
+    let data;
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      throw new Error("Valve history returned invalid JSON");
+    }
+
+    const matches = Array.isArray(data?.result?.matches)
+      ? data.result.matches
+      : [];
+
+    if (!matches.length) break;
+
+    let added = 0;
+
+    for (const match of matches) {
+      const matchId = Number(match?.match_id || 0);
+      if (!matchId || seen.has(matchId)) continue;
+
+      seen.add(matchId);
+      allMatches.push(match);
+      added += 1;
+    }
+
+    if (added === 0 || matches.length < 100) break;
+
+    const lastMatchId = Number(
+      matches[matches.length - 1]?.match_id || 0,
+    );
+
+    if (!lastMatchId || lastMatchId === startAtMatchId) break;
+    startAtMatchId = lastMatchId;
+  }
+
+  return allMatches;
+}
+
+function valveTeamName(match, isRadiant) {
+  const name = isRadiant
+    ? match?.radiant_team_name
+    : match?.dire_team_name;
+
+  if (name) return canonicalTeam(name);
+
+  const id = Number(
+    isRadiant
+      ? match?.radiant_team_id
+      : match?.dire_team_id,
+  );
+
+  const idMap = new Map([
+    [9247354, "Team Falcons"],
+    [8255888, "BoomBoys"],
+    [9467224, "Aurora Gaming"],
+    [10136357, "Nigma Galaxy"],
+    [10150538, "LGD Gaming"],
+    [726228, "Vici Gaming"],
+    [10150413, "Iron Wing"],
+    [2586976, "OG"],
+    [9823272, "Team Yandex"],
+    [9824702, "Team Vision"],
+  ]);
+
+  return idMap.get(id) || `Team ${id}`;
+}
+
+function buildValveSeries(matches) {
+  const normalized = (matches || [])
+    .map((match) => {
+      const matchId = Number(match?.match_id || 0);
+      const startTime = Number(match?.start_time || 0);
+      const radiant = valveTeamName(match, true);
+      const dire = valveTeamName(match, false);
+      const radiantWin = Boolean(match?.radiant_win);
+
+      return {
+        matchId,
+        startTime,
+        radiant,
+        dire,
+        winner: radiantWin ? radiant : dire,
+        loser: radiantWin ? dire : radiant,
+      };
+    })
+    .filter(
+      (m) =>
+        m.matchId &&
+        m.startTime &&
+        m.radiant !== "Unknown" &&
+        m.dire !== "Unknown",
+    )
+    .sort(
+      (a, b) =>
+        a.startTime - b.startTime ||
+        a.matchId - b.matchId,
+    );
+
+  const groups = [];
+  let current = null;
+
+  for (const match of normalized) {
+    const pair = [match.radiant, match.dire].sort().join("|");
+
+    if (
+      !current ||
+      current.pair !== pair ||
+      match.startTime - current.lastStartTime > 3 * 60 * 60
+    ) {
+      current = {
+        pair,
+        teamA: match.radiant,
+        teamB: match.dire,
+        scoreA: 0,
+        scoreB: 0,
+        startTime: match.startTime,
+        lastStartTime: match.startTime,
+        matchIds: [],
+      };
+      groups.push(current);
+    }
+
+    current.lastStartTime = match.startTime;
+    current.matchIds.push(match.matchId);
+
+    if (match.winner === current.teamA) current.scoreA += 1;
+    else if (match.winner === current.teamB) current.scoreB += 1;
+  }
+
+  const preliminary = [];
+
+  for (const g of groups) {
+    if (Math.max(g.scoreA, g.scoreB) < 2) continue;
+
+    const winner = g.scoreA > g.scoreB ? g.teamA : g.teamB;
+    const loser = winner === g.teamA ? g.teamB : g.teamA;
+
+    preliminary.push({
+      key: `valve:${g.matchIds.join("-")}`,
+      seriesId: Number(g.matchIds[g.matchIds.length - 1] || 0),
+      startTime: g.startTime,
+      teamA: g.teamA,
+      teamB: g.teamB,
+      scoreA: g.scoreA,
+      scoreB: g.scoreB,
+      winner,
+      loser,
+    });
+  }
+
+  preliminary.sort(
+    (a, b) =>
+      a.startTime - b.startTime ||
+      a.seriesId - b.seriesId,
+  );
+
+  const states = new Map();
+
+  const stateFor = (team) => {
+    if (!states.has(team)) {
+      states.set(team, emptyTeamState(team));
+    }
+    return states.get(team);
+  };
+
+  for (const s of preliminary) {
+    const a = stateFor(s.teamA);
+    const b = stateFor(s.teamB);
+
+    const aReady = isEliminationReady(a);
+    const bReady = isEliminationReady(b);
+
+    s.stage = aReady && bReady ? "elimination" : "swiss";
+
+    if (s.stage === "swiss") {
+      stateFor(s.winner).swissWins += 1;
+      stateFor(s.loser).swissLosses += 1;
+    } else {
+      stateFor(s.winner).eliminationResult = "won";
+      stateFor(s.loser).eliminationResult = "lost";
+    }
+  }
+
+  return preliminary;
+}
+
+function calculateStatesFromValveSeries(series) {
+  const states = new Map();
+
+  for (const p of PREDICTIONS) {
+    states.set(p.team, emptyTeamState(p.team));
+  }
+
+  const stateFor = (team) => {
+    if (!states.has(team)) {
+      states.set(team, emptyTeamState(team));
+    }
+    return states.get(team);
+  };
+
+  for (const s of series) {
+    if (s.stage === "swiss") {
+      stateFor(s.winner).swissWins += 1;
+      stateFor(s.loser).swissLosses += 1;
+
+      const a = stateFor(s.teamA);
+      const b = stateFor(s.teamB);
+
+      a.gameWins += s.scoreA;
+      a.gameLosses += s.scoreB;
+      b.gameWins += s.scoreB;
+      b.gameLosses += s.scoreA;
+    } else {
+      stateFor(s.winner).eliminationResult = "won";
+      stateFor(s.loser).eliminationResult = "lost";
+    }
+  }
+
+  return { states, series };
+}
+
+function statusTextFromValve(valveSeries, liveGames = []) {
+  const { states, series } =
+    calculateStatesFromValveSeries(valveSeries);
+
+  const valveLiveSeries =
+    getValveLiveSeries(liveGames);
+
+  const getData = (team, kind) => {
+    const state =
+      states.get(team) ||
+      emptyTeamState(team);
+
+    const [status] =
+      predictionStatus(kind, state);
+
+    return {
+      state,
+      status,
+      icon: predictionIcon(status, state),
+      hint: compactPredictionHint(kind, state, status),
+    };
+  };
+
+  const lines = [
+    "🏆 <b>TI 2026 — МОИ ПРОГНОЗЫ</b>",
+    "━━━━━━━━━━━━━━━━━━",
+    "",
+    "🎯 <b>ТОЧНЫЙ СЧЁТ</b>",
+    "",
+    "<b>4–0</b>",
+  ];
+
+  const appendGroup = (kind, showHintAlways = true) => {
+    for (const p of PREDICTIONS.filter((x) => x.kind === kind)) {
+      const d = getData(p.team, p.kind);
+
+      lines.push(
+        `${d.icon} <b>${escapeHtml(
+          p.team,
+        )}</b> — <b>${d.state.swissWins}–${d.state.swissLosses}</b>`,
+      );
+
+      const liveLine =
+        liveStatusLine(
+          p.team,
+          valveLiveSeries,
+        );
+
+      if (liveLine) {
+        lines.push(liveLine);
+      }
+
+      if (
+        d.hint &&
+        (showHintAlways || d.status !== "alive")
+      ) {
+        lines.push(
+          `   ↳ ${escapeHtml(d.hint)}`,
+        );
+      }
+    }
+  };
+
+  appendGroup("4-0");
+
+  lines.push("", "<b>4–1</b>");
+  appendGroup("4-1");
+
+  lines.push(
+    "",
+    "🔥 <b>ПРОХОДЯТ РАУНД НА ВЫБЫВАНИЕ</b>",
+    "",
+  );
+  appendGroup("elim_win", false);
+
+  lines.push(
+    "",
+    "💀 <b>ВЫЛЕТАЮТ В РАУНДЕ НА ВЫБЫВАНИЕ</b>",
+    "",
+  );
+  appendGroup("elim_loss", false);
+
+  lines.push(
+    "",
+    "🎯 <b>ТОЧНЫЙ СЧЁТ</b>",
+    "",
+    "<b>1–4</b>",
+  );
+  appendGroup("1-4");
+
+  lines.push("", "<b>0–4</b>");
+  appendGroup("0-4");
+
+  lines.push(
+    "",
+    "━━━━━━━━━━━━━━━━━━",
+    "⚪ ещё не играли  ·  🟢 прогноз жив",
+    "🟡 решающий этап  ·  🔴 проигран  ·  ✅ сыграл",
+    "",
+    `📊 Завершено серий: <b>${series.length}</b>`,
+  );
+
+  return lines.join("\n");
+}
+
+function recentValveSeriesText(series) {
+  if (!series.length) {
+    return "Пока ни одной завершённой серии TI 2026 не найдено.";
+  }
+
+  const sorted = [...series].sort(
+    (a, b) =>
+      b.startTime - a.startTime ||
+      b.seriesId - a.seriesId,
+  );
+
+  const groups = new Map();
+
+  const dateFormatter =
+    new Intl.DateTimeFormat("ru-RU", {
+      timeZone: "Europe/Riga",
+      day: "numeric",
+      month: "long",
+    });
+
+  const dateKeyFormatter =
+    new Intl.DateTimeFormat("ru-RU", {
+      timeZone: "Europe/Riga",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+
+  const timeFormatter =
+    new Intl.DateTimeFormat("ru-RU", {
+      timeZone: "Europe/Riga",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+
+  for (const s of sorted) {
+    const date = new Date(s.startTime * 1000);
+    const dateKey = dateKeyFormatter.format(date);
+    const dateTitle = dateFormatter.format(date);
+
+    if (!groups.has(dateKey)) {
+      groups.set(dateKey, {
+        title: dateTitle,
+        items: [],
+      });
+    }
+
+    groups.get(dateKey).items.push(s);
+  }
+
+  const lines = [
+    "🎮 <b>TI 2026 — сыгранные серии</b>",
+    "",
+  ];
+
+  for (const group of groups.values()) {
+    lines.push(
+      `📅 <b>${escapeHtml(group.title)}</b>`,
+      "",
+    );
+
+    for (const s of group.items) {
+      const winnerScore =
+        s.winner === s.teamA
+          ? s.scoreA
+          : s.scoreB;
+
+      const loserScore =
+        s.winner === s.teamA
+          ? s.scoreB
+          : s.scoreA;
+
+      const time =
+        timeFormatter.format(
+          new Date(s.startTime * 1000),
+        );
+
+      lines.push(
+        `🕐 <b>${time}</b> · ✅ ` +
+          `<b>${escapeHtml(s.winner)}</b> ` +
+          `<b>${winnerScore}:${loserScore}</b> ` +
+          `${escapeHtml(s.loser)}`,
+      );
+    }
+
+    lines.push("");
+  }
+
+  lines.push(
+    `Завершено серий: <b>${series.length}</b>`,
+  );
+
+  return lines.join("\n");
+}
+
 async function fetchValveLiveGames(env) {
   if (!env.STEAM_API_KEY) {
     throw new Error(
@@ -3902,56 +4358,47 @@ export class BotState
       text ===
         "📊 Статус"
     ) {
-      const games =
-        await this.getGames();
-
-      let liveGames = [];
-
       try {
-        liveGames =
-          await fetchValveLiveGames(
-            this.env,
+        const [
+          valveMatches,
+          liveGames,
+        ] =
+          await Promise.all([
+            fetchValveMatchHistory(
+              this.env,
+            ),
+            fetchValveLiveGames(
+              this.env,
+            ),
+          ]);
+
+        const valveSeries =
+          buildValveSeries(
+            valveMatches,
           );
-      } catch (error) {
-        console.error(
-          "Valve status overlay failed:",
-          error,
-        );
-      }
-
-      if (
-        !games.length
-      ) {
-        const error =
-          (
-            await this.ctx.storage.get(
-              "lastError",
-            )
-          ) ||
-          "матчи пока не получены";
 
         await sendTelegram(
           this.env,
-
           chatId,
-
-          `⚠️ Пока нет сохранённых матчей TI 2026.\nПоследняя ошибка:\n<code>${escapeHtml(
-            error,
-          )}</code>`,
-
-          telegramKeyboard(),
-        );
-      } else {
-        await sendTelegram(
-          this.env,
-
-          chatId,
-
-          statusText(
-            games,
+          statusTextFromValve(
+            valveSeries,
             liveGames,
           ),
+          telegramKeyboard(),
+        );
+      } catch (error) {
+        console.error(
+          "Valve status error:",
+          error,
+        );
 
+        await sendTelegram(
+          this.env,
+          chatId,
+          "⚠️ <b>Не удалось получить статус Valve.</b>\n\n" +
+            `<code>${escapeHtml(
+              String(error),
+            )}</code>`,
           telegramKeyboard(),
         );
       }
@@ -3969,17 +4416,41 @@ export class BotState
       text ===
         "🎮 Последние матчи"
     ) {
-      await sendTelegram(
-        this.env,
+      try {
+        const valveMatches =
+          await fetchValveMatchHistory(
+            this.env,
+          );
 
-        chatId,
+        const valveSeries =
+          buildValveSeries(
+            valveMatches,
+          );
 
-        recentGamesText(
-          await this.getGames(),
-        ),
+        await sendTelegram(
+          this.env,
+          chatId,
+          recentValveSeriesText(
+            valveSeries,
+          ),
+          telegramKeyboard(),
+        );
+      } catch (error) {
+        console.error(
+          "Valve history error:",
+          error,
+        );
 
-        telegramKeyboard(),
-      );
+        await sendTelegram(
+          this.env,
+          chatId,
+          "⚠️ <b>Не удалось получить историю Valve.</b>\n\n" +
+            `<code>${escapeHtml(
+              String(error),
+            )}</code>`,
+          telegramKeyboard(),
+        );
+      }
 
       return {
         ok: true,
@@ -4183,8 +4654,8 @@ export class BotState
 
             chatId,
 
-            statusText(
-              games,
+            statusTextFromValve(
+              valveSeries,
               liveGames,
             ),
 
@@ -4211,7 +4682,7 @@ export class BotState
 
         chatId,
 
-        "🔄 Проверяю TI 2026 через STRATZ…",
+        "🔄 Проверяю TI 2026 через Valve + STRATZ…",
 
         telegramKeyboard(),
       );
@@ -4234,6 +4705,32 @@ export class BotState
 
       const games =
         await this.getGames();
+
+      let valveSeries = [];
+      let liveGames = [];
+
+      try {
+        const valveMatches =
+          await fetchValveMatchHistory(
+            this.env,
+          );
+
+        valveSeries =
+          buildValveSeries(
+            valveMatches,
+          );
+
+        liveGames =
+          await fetchValveLiveGames(
+            this.env,
+          );
+      } catch (error) {
+        console.error(
+          "Valve check status error:",
+          error,
+        );
+      }
+
 
       let liveGames = [];
       
@@ -4278,10 +4775,10 @@ export class BotState
 
           chatId,
 
-          statusText(
-            games,
-            liveGames,
-          ),
+            statusTextFromValve(
+              valveSeries,
+              liveGames,
+            ),
 
           telegramKeyboard(),
         );
