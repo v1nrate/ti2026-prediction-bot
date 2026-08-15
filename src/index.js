@@ -3731,47 +3731,46 @@ async function fetchCurrentTIGames(
           []
         )
       ) {
-        const radiantId =
+       const radiantId =
           Number(
             raw.radiantTeamId ||
-              raw.radiantTeam
-                ?.id ||
+              raw.radiantTeam?.id ||
               0,
           );
-
+        
         const direId =
           Number(
             raw.direTeamId ||
-              raw.direTeam
-                ?.id ||
+              raw.direTeam?.id ||
               0,
           );
-
+        
+        /*
+         * Сначала проверяем:
+         * это вообще матч TI 2026?
+         */
         if (
-          radiantId >
-          0
+          Number(
+            raw.leagueId,
+          ) !== LEAGUE_ID
         ) {
+          continue;
+        }
+        
+        /*
+         * И только у матчей TI
+         * запоминаем team IDs.
+         */
+        if (radiantId > 0) {
           discoveredIds.add(
             radiantId,
           );
         }
-
-        if (
-          direId >
-          0
-        ) {
+        
+        if (direId > 0) {
           discoveredIds.add(
             direId,
           );
-        }
-
-        if (
-          Number(
-            raw.leagueId,
-          ) !==
-          LEAGUE_ID
-        ) {
-          continue;
         }
 
         const game =
@@ -4031,11 +4030,6 @@ export class BotState
       await this.getGames();
 
     const knownTeamIds =
-      (
-        await this.ctx.storage.get(
-          "knownTeamIds",
-        )
-      ) ||
       SEED_TEAM_IDS;
 
     const incoming =
