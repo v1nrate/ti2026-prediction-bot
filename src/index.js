@@ -1163,8 +1163,338 @@ function compactPredictionHint(
   return null;
 }
 
+function getValveLiveSeries(
+  liveGames,
+) {
+  const bySeries =
+    new Map();
+
+  for (
+    const game
+    of (liveGames || [])
+  ) {
+    const seriesId =
+      Number(
+        game?.series_id || 0,
+      );
+
+    const radiant =
+      canonicalTeam(
+        game?.radiant_team
+          ?.team_name ||
+          "Radiant",
+      );
+
+    const dire =
+      canonicalTeam(
+        game?.dire_team
+          ?.team_name ||
+          "Dire",
+      );
+
+    if (
+      !seriesId ||
+      radiant === "Unknown" ||
+      dire === "Unknown"
+    ) {
+      continue;
+    }
+
+    const radiantSeriesWins =
+      Number(
+        game?.radiant_series_wins ||
+          0,
+      );
+
+    const direSeriesWins =
+      Number(
+        game?.dire_series_wins ||
+          0,
+      );
+
+    const radiantMapScore =
+      Number(
+        game?.scoreboard
+          ?.radiant
+          ?.score ||
+          0,
+      );
+
+    const direMapScore =
+      Number(
+        game?.scoreboard
+          ?.dire
+          ?.score ||
+          0,
+      );
+
+    const duration =
+      Number(
+        game?.scoreboard
+          ?.duration ||
+          0,
+      );
+
+    bySeries.set(
+      seriesId,
+      {
+        seriesId,
+
+        radiant,
+        dire,
+
+        radiantSeriesWins,
+        direSeriesWins,
+
+        radiantMapScore,
+        direMapScore,
+
+        duration,
+
+        finished:
+          radiantSeriesWins >= 2 ||
+          direSeriesWins >= 2,
+      },
+    );
+  }
+
+  return [
+    ...bySeries.values(),
+  ];
+}
+
+function isEliminationReady(
+  state,
+) {
+  if (!state) {
+    return false;
+  }
+
+  return (
+    state.swissWins +
+      state.swissLosses >=
+      5 &&
+    (
+      (
+        state.swissWins === 3 &&
+        state.swissLosses === 2
+      ) ||
+      (
+        state.swissWins === 2 &&
+        state.swissLosses === 3
+      )
+    )
+  );
+}
+
+function applyValveFinishedSeries(
+  states,
+  stratzSeries,
+  valveSeries,
+) {
+  const existingSeriesIds =
+    new Set(
+      (stratzSeries || [])
+        .map(
+          (s) =>
+            Number(
+              s.seriesId || 0,
+            ),
+        )
+        .filter(Boolean),
+    );
+
+  let addedSeries = 0;
+
+  for (
+    const live
+    of valveSeries
+  ) {
+    if (
+      !live.finished ||
+      existingSeriesIds.has(
+        live.seriesId,
+      )
+    ) {
+      continue;
+    }
+
+    const radiantState =
+      states.get(
+        live.radiant,
+      ) ||
+      emptyTeamState(
+        live.radiant,
+      );
+
+    const direState =
+      states.get(
+        live.dire,
+      ) ||
+      emptyTeamState(
+        live.dire,
+      );
+
+    if (
+      !states.has(
+        live.radiant,
+      )
+    ) {
+      states.set(
+        live.radiant,
+        radiantState,
+      );
+    }
+
+    if (
+      !states.has(
+        live.dire,
+      )
+    ) {
+      states.set(
+        live.dire,
+        direState,
+      );
+    }
+
+    const winner =
+      live.radiantSeriesWins >
+      live.direSeriesWins
+        ? live.radiant
+        : live.dire;
+
+    const loser =
+      winner === live.radiant
+        ? live.dire
+        : live.radiant;
+
+    const elimination =
+      isEliminationReady(
+        radiantState,
+      ) &&
+      isEliminationReady(
+        direState,
+      );
+
+    if (elimination) {
+      states.get(
+        winner,
+      ).eliminationResult =
+        "won";
+
+      states.get(
+        loser,
+      ).eliminationResult =
+        "lost";
+    } else {
+      states.get(
+        winner,
+      ).swissWins += 1;
+
+      states.get(
+        loser,
+      ).swissLosses += 1;
+    }
+
+    existingSeriesIds.add(
+      live.seriesId,
+    );
+
+    addedSeries += 1;
+  }
+
+  return addedSeries;
+}
+
+function getLiveTeamInfo(
+  team,
+  valveSeries,
+) {
+  for (
+    const live
+    of valveSeries
+  ) {
+    if (
+      live.finished
+    ) {
+      continue;
+    }
+
+    if (
+      live.radiant !== team &&
+      live.dire !== team
+    ) {
+      continue;
+    }
+
+    const isRadiant =
+      live.radiant ===
+      team;
+
+    return {
+      opponent:
+        isRadiant
+          ? live.dire
+          : live.radiant,
+
+      ourSeriesWins:
+        isRadiant
+          ? live.radiantSeriesWins
+          : live.direSeriesWins,
+
+      theirSeriesWins:
+        isRadiant
+          ? live.direSeriesWins
+          : live.radiantSeriesWins,
+
+      ourMapScore:
+        isRadiant
+          ? live.radiantMapScore
+          : live.direMapScore,
+
+      theirMapScore:
+        isRadiant
+          ? live.direMapScore
+          : live.radiantMapScore,
+
+      duration:
+        live.duration,
+    };
+  }
+
+  return null;
+}
+
+function liveStatusLine(
+  team,
+  valveSeries,
+) {
+  const live =
+    getLiveTeamInfo(
+      team,
+      valveSeries,
+    );
+
+  if (!live) {
+    return null;
+  }
+
+  return (
+    `   🔴 <b>LIVE</b>: ` +
+    `vs ${escapeHtml(
+      live.opponent,
+    )} · ` +
+    `серия <b>${live.ourSeriesWins}:${live.theirSeriesWins}</b> · ` +
+    `карта <b>${live.ourMapScore}:${live.theirMapScore}</b> · ` +
+    `⏱ ${formatLiveDuration(
+      live.duration,
+    )}`
+  );
+}
+
 function statusText(
   games,
+  liveGames = [],
 ) {
   const {
     states,
@@ -1172,6 +1502,18 @@ function statusText(
   } =
     calculateStates(
       games,
+    );
+
+  const valveSeries =
+    getValveLiveSeries(
+      liveGames,
+    );
+
+  const valveFinishedSeries =
+    applyValveFinishedSeries(
+      states,
+      series,
+      valveSeries,
     );
 
   const getData =
@@ -1246,6 +1588,18 @@ function statusText(
       )}</b> — <b>${d.state.swissWins}–${d.state.swissLosses}</b>`,
     );
 
+    const liveLine =
+      liveStatusLine(
+        p.team,
+        valveSeries,
+      );
+    
+    if (liveLine) {
+      lines.push(
+        liveLine,
+      );
+    }
+
     if (
       d.hint
     ) {
@@ -1281,6 +1635,18 @@ function statusText(
         p.team,
       )}</b> — <b>${d.state.swissWins}–${d.state.swissLosses}</b>`,
     );
+
+    const liveLine =
+      liveStatusLine(
+        p.team,
+        valveSeries,
+      );
+    
+    if (liveLine) {
+      lines.push(
+        liveLine,
+      );
+    }
 
     if (
       d.hint
@@ -1318,6 +1684,18 @@ function statusText(
         p.team,
       )}</b> — <b>${d.state.swissWins}–${d.state.swissLosses}</b>`,
     );
+
+    const liveLine =
+      liveStatusLine(
+        p.team,
+        valveSeries,
+      );
+    
+    if (liveLine) {
+      lines.push(
+        liveLine,
+      );
+    }
 
     if (
       d.status !==
@@ -1357,6 +1735,18 @@ function statusText(
         p.team,
       )}</b> — <b>${d.state.swissWins}–${d.state.swissLosses}</b>`,
     );
+
+    const liveLine =
+      liveStatusLine(
+        p.team,
+        valveSeries,
+      );
+    
+    if (liveLine) {
+      lines.push(
+        liveLine,
+      );
+    }
 
     if (
       d.status !==
@@ -1398,6 +1788,18 @@ function statusText(
       )}</b> — <b>${d.state.swissWins}–${d.state.swissLosses}</b>`,
     );
 
+    const liveLine =
+      liveStatusLine(
+        p.team,
+        valveSeries,
+      );
+    
+    if (liveLine) {
+      lines.push(
+        liveLine,
+      );
+    }
+
     if (
       d.hint
     ) {
@@ -1434,6 +1836,18 @@ function statusText(
       )}</b> — <b>${d.state.swissWins}–${d.state.swissLosses}</b>`,
     );
 
+    const liveLine =
+      liveStatusLine(
+        p.team,
+        valveSeries,
+      );
+    
+    if (liveLine) {
+      lines.push(
+        liveLine,
+      );
+    }
+
     if (
       d.hint
     ) {
@@ -1451,7 +1865,7 @@ function statusText(
     "⚪ ещё не играли  ·  🟢 прогноз жив",
     "🟡 решающий этап  ·  🔴 проигран  ·  ✅ сыграл",
     "",
-    `📊 Завершено серий: <b>${series.length}</b>`,
+    `📊 Завершено серий: <b>${series.length + valveFinishedSeries}</b>`,
   );
 
   return lines.join(
@@ -3491,6 +3905,20 @@ export class BotState
       const games =
         await this.getGames();
 
+      let liveGames = [];
+
+      try {
+        liveGames =
+          await fetchValveLiveGames(
+            this.env,
+          );
+      } catch (error) {
+        console.error(
+          "Valve status overlay failed:",
+          error,
+        );
+      }
+
       if (
         !games.length
       ) {
@@ -3521,6 +3949,7 @@ export class BotState
 
           statusText(
             games,
+            liveGames,
           ),
 
           telegramKeyboard(),
@@ -3722,6 +4151,20 @@ export class BotState
         const games =
           await this.getGames();
 
+        let liveGames = [];
+        
+        try {
+          liveGames =
+            await fetchValveLiveGames(
+              this.env,
+            );
+        } catch (error) {
+          console.error(
+            "Valve cooldown status overlay failed:",
+            error,
+          );
+        }
+
         await sendTelegram(
           this.env,
 
@@ -3742,6 +4185,7 @@ export class BotState
 
             statusText(
               games,
+              liveGames,
             ),
 
             telegramKeyboard(),
@@ -3791,6 +4235,20 @@ export class BotState
       const games =
         await this.getGames();
 
+      let liveGames = [];
+      
+      try {
+        liveGames =
+          await fetchValveLiveGames(
+            this.env,
+          );
+      } catch (error) {
+        console.error(
+          "Valve status overlay after check failed:",
+          error,
+        );
+      }
+
       await sendTelegram(
         this.env,
 
@@ -3802,12 +4260,12 @@ export class BotState
             )}</code>`
 
           : `✅ Готово.
-Источник: <b>STRATZ</b>
-League ID: <code>${LEAGUE_ID}</code>
-Карт сохранено: <b>${result.games}</b>
-Новых карт: <b>${result.newGames}</b>
-Известно team ID: <b>${result.knownTeams}</b>
-Время проверки: <b>${checkSeconds} сек.</b>`,
+          Источник: <b>STRATZ</b>
+          League ID: <code>${LEAGUE_ID}</code>
+          Карт сохранено: <b>${result.games}</b>
+          Новых карт: <b>${result.newGames}</b>
+          Известно team ID: <b>${result.knownTeams}</b>
+          Время проверки: <b>${checkSeconds} сек.</b>`,
 
         telegramKeyboard(),
       );
@@ -3822,6 +4280,7 @@ League ID: <code>${LEAGUE_ID}</code>
 
           statusText(
             games,
+            liveGames,
           ),
 
           telegramKeyboard(),
