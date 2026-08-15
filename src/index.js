@@ -1,6 +1,14 @@
 import { DurableObject } from "cloudflare:workers";
 
 const LEAGUE_ID = 19719;
+const VALVE_LIVE_URL =
+  "https://api.steampowered.com/IDOTA2Match_570/GetLiveLeagueGames/v1/";
+
+const VALVE_HEROES_URL =
+  "https://api.steampowered.com/IEconDOTA2_570/GetHeroes/v1/";
+
+const HERO_CACHE_MS =
+  24 * 60 * 60 * 1000;
 const STRATZ_GRAPHQL = "https://api.stratz.com/graphql";
 
 const TEAM_MATCH_TAKE = 5;
@@ -1736,6 +1744,556 @@ function recentGamesText(
   );
 }
 
+async function fetchValveLiveGames(env) {
+  if (!env.STEAM_API_KEY) {
+    throw new Error(
+      "STEAM_API_KEY secret is missing",
+    );
+  }
+
+  const url =
+    new URL(
+      VALVE_LIVE_URL,
+    );
+
+  url.searchParams.set(
+    "key",
+    env.STEAM_API_KEY,
+  );
+
+  const response =
+    await fetch(
+      url.toString(),
+      {
+        headers: {
+          accept:
+            "application/json",
+        },
+      },
+    );
+
+  const text =
+    await response.text();
+
+  if (!response.ok) {
+    throw new Error(
+      `Valve LIVE HTTP ${response.status}: ${text.slice(
+        0,
+        300,
+      )}`,
+    );
+  }
+
+  let data;
+
+  try {
+    data =
+      JSON.parse(text);
+  } catch {
+    throw new Error(
+      "Valve LIVE returned invalid JSON",
+    );
+  }
+
+  const games =
+    Array.isArray(
+      data?.result?.games,
+    )
+      ? data.result.games
+      : [];
+
+  /*
+   * Только The International 2026.
+   */
+  return games.filter(
+    (game) =>
+      Number(
+        game?.league_id ||
+          0,
+      ) === LEAGUE_ID,
+  );
+}
+
+async function fetchValveHeroes(env) {
+  if (!env.STEAM_API_KEY) {
+    throw new Error(
+      "STEAM_API_KEY secret is missing",
+    );
+  }
+
+  const url =
+    new URL(
+      VALVE_HEROES_URL,
+    );
+
+  url.searchParams.set(
+    "key",
+    env.STEAM_API_KEY,
+  );
+
+  url.searchParams.set(
+    "language",
+    "english",
+  );
+
+  const response =
+    await fetch(
+      url.toString(),
+      {
+        headers: {
+          accept:
+            "application/json",
+        },
+      },
+    );
+
+  const text =
+    await response.text();
+
+  if (!response.ok) {
+    throw new Error(
+      `Valve GetHeroes HTTP ${response.status}: ${text.slice(
+        0,
+        300,
+      )}`,
+    );
+  }
+
+  let data;
+
+  try {
+    data =
+      JSON.parse(text);
+  } catch {
+    throw new Error(
+      "Valve GetHeroes returned invalid JSON",
+    );
+  }
+
+  const result = {};
+
+  for (
+    const hero
+    of (
+      data?.result?.heroes ||
+      []
+    )
+  ) {
+    const id =
+      Number(
+        hero?.id || 0,
+      );
+
+    if (!id) {
+      continue;
+    }
+
+    result[id] =
+      hero.localized_name ||
+      hero.name ||
+      `Hero ${id}`;
+  }
+
+  return result;
+}
+
+function formatLiveDuration(seconds) {
+  const total =
+    Math.max(
+      0,
+      Math.floor(
+        Number(
+          seconds || 0,
+        ),
+      ),
+    );
+
+  const minutes =
+    Math.floor(
+      total / 60,
+    );
+
+  const secs =
+    total % 60;
+
+  return (
+    `${minutes}:` +
+    String(
+      secs,
+    ).padStart(
+      2,
+      "0",
+    )
+  );
+}
+
+function formatNW(value) {
+  const n =
+    Number(
+      value || 0,
+    );
+
+  if (
+    Math.abs(n) >=
+    1000
+  ) {
+    return (
+      `${(
+        n / 1000
+      ).toFixed(1)}k`
+    );
+  }
+
+  return String(n);
+}
+
+function getValvePlayerNames(game) {
+  const map =
+    new Map();
+
+  for (
+    const player
+    of (
+      game?.players ||
+      []
+    )
+  ) {
+    const accountId =
+      Number(
+        player?.account_id ||
+          0,
+      );
+
+    if (
+      accountId &&
+      player?.name
+    ) {
+      map.set(
+        accountId,
+        String(
+          player.name,
+        ),
+      );
+    }
+  }
+
+  return map;
+}
+
+function getLivePlayers(
+  side,
+  playerNames,
+  heroNames,
+) {
+  return (
+    Array.isArray(
+      side?.players,
+    )
+      ? side.players
+      : []
+  ).map(
+    (player) => {
+      const heroId =
+        Number(
+          player?.hero_id ||
+            0,
+        );
+
+      const accountId =
+        Number(
+          player?.account_id ||
+            0,
+        );
+
+      return {
+        playerName:
+          playerNames.get(
+            accountId,
+          ) ||
+          `Player ${accountId}`,
+
+        heroName:
+          heroNames[
+            heroId
+          ] ||
+          (
+            heroId
+              ? `Hero ${heroId}`
+              : "Не выбран"
+          ),
+
+        kills:
+          Number(
+            player?.kills ||
+              0,
+          ),
+
+        deaths:
+          Number(
+            player?.death ||
+              0,
+          ),
+
+        assists:
+          Number(
+            player?.assists ||
+              0,
+          ),
+
+        level:
+          Number(
+            player?.level ||
+              0,
+          ),
+
+        networth:
+          Number(
+            player?.net_worth ||
+              0,
+          ),
+
+        gpm:
+          Number(
+            player?.gold_per_min ||
+              0,
+          ),
+
+        xpm:
+          Number(
+            player?.xp_per_min ||
+              0,
+          ),
+      };
+    },
+  );
+}
+
+function getTeamNetworth(side) {
+  return (
+    side?.players ||
+    []
+  ).reduce(
+    (
+      total,
+      player,
+    ) =>
+      total +
+      Number(
+        player?.net_worth ||
+          0,
+      ),
+    0,
+  );
+}
+
+function buildValveLiveGameText(
+  game,
+  heroNames,
+) {
+  const radiantName =
+    canonicalTeam(
+      game?.radiant_team
+        ?.team_name ||
+        "Radiant",
+    );
+
+  const direName =
+    canonicalTeam(
+      game?.dire_team
+        ?.team_name ||
+        "Dire",
+    );
+
+  const scoreboard =
+    game?.scoreboard ||
+    {};
+
+  const radiant =
+    scoreboard?.radiant ||
+    {};
+
+  const dire =
+    scoreboard?.dire ||
+    {};
+
+  const radiantScore =
+    Number(
+      radiant?.score ||
+        0,
+    );
+
+  const direScore =
+    Number(
+      dire?.score ||
+        0,
+    );
+
+  const radiantSeries =
+    Number(
+      game?.radiant_series_wins ||
+        0,
+    );
+
+  const direSeries =
+    Number(
+      game?.dire_series_wins ||
+        0,
+    );
+
+  const duration =
+    formatLiveDuration(
+      scoreboard?.duration ||
+        0,
+    );
+
+  const names =
+    getValvePlayerNames(
+      game,
+    );
+
+  const radiantPlayers =
+    getLivePlayers(
+      radiant,
+      names,
+      heroNames,
+    );
+
+  const direPlayers =
+    getLivePlayers(
+      dire,
+      names,
+      heroNames,
+    );
+
+  const radiantNW =
+    getTeamNetworth(
+      radiant,
+    );
+
+  const direNW =
+    getTeamNetworth(
+      dire,
+    );
+
+  const diff =
+    radiantNW -
+    direNW;
+
+  let leadText =
+    "по золоту примерно равно";
+
+  if (diff > 0) {
+    leadText =
+      `${radiantName} +${formatNW(
+        diff,
+      )}`;
+  } else if (diff < 0) {
+    leadText =
+      `${direName} +${formatNW(
+        Math.abs(diff),
+      )}`;
+  }
+
+  const lines = [
+    `⚔️ <b>${escapeHtml(
+      radiantName,
+    )} ${radiantScore}:${direScore} ${escapeHtml(
+      direName,
+    )}</b>`,
+
+    `⏱ <b>${duration}</b> · серия <b>${radiantSeries}:${direSeries}</b>`,
+
+    `💰 ${escapeHtml(
+      leadText,
+    )}`,
+
+    "",
+  ];
+
+  /*
+   * Radiant
+   */
+  lines.push(
+    `🟢 <b>${escapeHtml(
+      radiantName,
+    )}</b> · NW ${formatNW(
+      radiantNW,
+    )}`,
+  );
+
+  if (
+    radiantPlayers.length
+  ) {
+    for (
+      const p
+      of radiantPlayers
+    ) {
+      lines.push(
+        `• <b>${escapeHtml(
+          p.heroName,
+        )}</b> — ` +
+          `${escapeHtml(
+            p.playerName,
+          )} · ` +
+          `${p.kills}/${p.deaths}/${p.assists} · ` +
+          `${formatNW(
+            p.networth,
+          )}`,
+      );
+    }
+  } else {
+    lines.push(
+      "• данные игроков пока недоступны",
+    );
+  }
+
+  lines.push("");
+
+  /*
+   * Dire
+   */
+  lines.push(
+    `🔴 <b>${escapeHtml(
+      direName,
+    )}</b> · NW ${formatNW(
+      direNW,
+    )}`,
+  );
+
+  if (
+    direPlayers.length
+  ) {
+    for (
+      const p
+      of direPlayers
+    ) {
+      lines.push(
+        `• <b>${escapeHtml(
+          p.heroName,
+        )}</b> — ` +
+          `${escapeHtml(
+            p.playerName,
+          )} · ` +
+          `${p.kills}/${p.deaths}/${p.assists} · ` +
+          `${formatNW(
+            p.networth,
+          )}`,
+      );
+    }
+  } else {
+    lines.push(
+      "• данные игроков пока недоступны",
+    );
+  }
+
+  /*
+   * Match ID специально НЕ показываем.
+   */
+  return lines.join(
+    "\n",
+  );
+}
+
 function telegramKeyboard() {
   return {
     keyboard: [
@@ -1757,6 +2315,13 @@ function telegramKeyboard() {
             "🎮 Результаты серий",
         },
 
+        {
+          text:
+            "🔴 LIVE матчи",
+        },
+      ],
+
+      [
         {
           text:
             "🔄 Проверить сейчас",
@@ -2534,6 +3099,51 @@ export class BotState
     ];
   }
 
+  async getHeroNames() {
+    const cached =
+      await this.ctx.storage.get(
+        "valveHeroNames",
+      );
+  
+    const cachedAt =
+      Number(
+        (
+          await this.ctx.storage.get(
+            "valveHeroNamesAt",
+          )
+        ) || 0,
+      );
+  
+    /*
+     * Используем кэш сутки.
+     */
+    if (
+      cached &&
+      Date.now() -
+        cachedAt <
+        HERO_CACHE_MS
+    ) {
+      return cached;
+    }
+  
+    const heroes =
+      await fetchValveHeroes(
+        this.env,
+      );
+  
+    await this.ctx.storage.put(
+      "valveHeroNames",
+      heroes,
+    );
+  
+    await this.ctx.storage.put(
+      "valveHeroNamesAt",
+      Date.now(),
+    );
+  
+    return heroes;
+  }
+
   async getGames() {
     return (
       (
@@ -2839,7 +3449,8 @@ export class BotState
           "📊 <b>Статус</b> — текущее состояние прогнозов\n" +
           "🎯 <b>Мои прогнозы</b> — полный список прогнозов\n" +
           "🎮 <b>Результаты серий</b> — сыгранные серии по дням\n" +
-          "🔄 <b>Проверить сейчас</b> — обновить данные STRATZ\n\n" +
+          "🔴 <b>LIVE матчи</b> — текущие карты, герои и статистика\n" +
+          "🔄 <b>Проверить сейчас</b> — обновить результаты STRATZ\n\n" +
           `Сейчас сохранено карт: <b>${games.length}</b>`,
 
         telegramKeyboard(),
@@ -2962,6 +3573,106 @@ export class BotState
         telegramKeyboard(),
       );
 
+      return {
+        ok: true,
+      };
+    }
+
+    if (
+      text === "/live" ||
+      text ===
+        "🔴 LIVE матчи"
+    ) {
+      try {
+        const [
+          liveGames,
+          heroNames,
+        ] =
+          await Promise.all([
+            fetchValveLiveGames(
+              this.env,
+            ),
+    
+            this.getHeroNames(),
+          ]);
+    
+        if (
+          !liveGames.length
+        ) {
+          await sendTelegram(
+            this.env,
+    
+            chatId,
+    
+            "🔴 <b>TI 2026 — LIVE</b>\n\n" +
+              "Сейчас активных карт TI 2026 нет.",
+    
+            telegramKeyboard(),
+          );
+    
+          return {
+            ok: true,
+          };
+        }
+    
+        /*
+         * Заголовок отдельным сообщением.
+         */
+        await sendTelegram(
+          this.env,
+    
+          chatId,
+    
+          "🔴 <b>TI 2026 — LIVE</b>\n\n" +
+            `Сейчас играют карт: <b>${liveGames.length}</b>`,
+    
+          telegramKeyboard(),
+        );
+    
+        /*
+         * Каждая карта отдельным сообщением.
+         *
+         * Так мы не упираемся в лимит Telegram
+         * на длину сообщения, если одновременно
+         * идёт 4-5 матчей.
+         */
+        for (
+          const game
+          of liveGames
+        ) {
+          await sendTelegram(
+            this.env,
+    
+            chatId,
+    
+            buildValveLiveGameText(
+              game,
+              heroNames,
+            ),
+    
+            telegramKeyboard(),
+          );
+        }
+      } catch (error) {
+        console.error(
+          "Valve LIVE error:",
+          error,
+        );
+    
+        await sendTelegram(
+          this.env,
+    
+          chatId,
+    
+          "⚠️ <b>Не удалось получить LIVE-матчи.</b>\n\n" +
+            `<code>${escapeHtml(
+              String(error),
+            )}</code>`,
+    
+          telegramKeyboard(),
+        );
+      }
+    
       return {
         ok: true,
       };
@@ -3131,6 +3842,7 @@ League ID: <code>${LEAGUE_ID}</code>
         "/status\n" +
         "/predictions\n" +
         "/matches\n" +
+        "/live\n" +
         "/check\n" +
         "/teams",
 
