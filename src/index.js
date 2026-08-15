@@ -14,7 +14,7 @@ const HERO_CACHE_MS =
   24 * 60 * 60 * 1000;
 const STRATZ_GRAPHQL = "https://api.stratz.com/graphql";
 
-const TEAM_MATCH_TAKE = 5;
+const TEAM_MATCH_TAKE = 20;
 const TEAM_BATCH_SIZE = 5;
 const CHECK_COOLDOWN_MS = 45 * 1000;
 
